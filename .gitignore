@@ -1,0 +1,11 @@
+*venv*
+.ipynb_checkpoints
+__pycache__
+
+# Ignore out folder except for README.md
+out/*
+!out/README.md
+
+# Ignore data folder except for README.md
+data/*
+!data/README.md

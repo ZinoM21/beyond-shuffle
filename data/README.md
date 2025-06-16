@@ -1,0 +1,1 @@
+This directory will be used to store your spotify. They will be ignored by git. To add data, request your "extended streaming history" from Spotify, unpack the ZIP you'll receive, and put all files directly in this data/ folder (so that you end up with a bunch of data/Streaming_History_Audio_YYYY_I files).
