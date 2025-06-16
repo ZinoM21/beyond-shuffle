@@ -1,6 +1,6 @@
-# Spotify Data Analysis
+# Beyond Shuffle: Composing Context-Responsive Playlists Through Behavioral Patterns with Spotify Data
 
-A Project for SE_25: Data Science @ CODE University of Applied Sciences in Berlin
+A code base for my bachelor thesis of the same name.
 
 ### Table of contents
 
@@ -11,11 +11,7 @@ A Project for SE_25: Data Science @ CODE University of Applied Sciences in Berli
 
 ## Description
 
-In Europe, you have the ability to request your streaming history since the creaion of your Spotify account.
-
-With this project, we exlpored different ways to visualize and get insights of our streaming log, like top listened to tracks or streaming behavior.
-
-We already did this for our own data and our next goal is to build a web app to let other users get the same results with ease.
+Based on the streaming history GDPR data request available with Spotify Europe, this project aimed to develop a software system that transforms a user's music streaming history into context-responsive playlists that specifically serve this purpose of memory evocation and self-reflection.
 
 ## Technology Stack
 
