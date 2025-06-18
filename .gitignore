@@ -9,3 +9,6 @@ out/*
 # Ignore data folder except for README.md
 data/*
 !data/README.md
+
+# env files
+.env*

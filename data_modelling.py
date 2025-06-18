@@ -13,9 +13,12 @@ def model_data(df: pd.DataFrame,  exclude_devices: list[str] = [], df_audio_feat
     if df_audio_features is not None:
         print(f"Modeling data with {len(df)} rows and {len(df_audio_features)} audio features rows")
         print("Concatenating audio features to streaming data set ...")
-        df_with_af = pd.concat([df_audio_features])
-        df_with_af.rename({'uri': 'spotify_track_uri'}, axis=1, inplace=True)
-        df_merged = df.join(df_with_af, on='spotify_track_uri')
+        if 'spotify_track_uri' not in df_audio_features.columns:
+            if 'uri' in df_audio_features.columns:
+                df_audio_features.rename({'uri': 'spotify_track_uri'}, axis=1, inplace=True)
+            else:
+                raise ValueError("Neither 'spotify_track_uri' nor 'uri' column found in audio features DataFrame")
+        df_merged = pd.merge(df, df_audio_features, on='spotify_track_uri', how='left')
     else:
         print(f"Modeling data with {len(df)} rows")
         df_merged = df
@@ -28,7 +31,6 @@ def model_data(df: pd.DataFrame,  exclude_devices: list[str] = [], df_audio_feat
     print("Renaming columns ...")
     df_renamed = df_sorted.rename(columns={
         'ms_played': 'listening_time_in_ms',
-        'duration_ms': 'api_song_lenght_in_ms',
         'conn_country':'country',
         'ip_addr_decrypted': 'ip_address',
         'master_metadata_track_name': 'track',
@@ -36,21 +38,22 @@ def model_data(df: pd.DataFrame,  exclude_devices: list[str] = [], df_audio_feat
         'master_metadata_album_album_name': 'album',
         'episode_name': 'podcast_episode',
         'episode_show_name': 'podcast_show',
-        'spotify_track_uri': 'track_uri',
-        'spotify_episode_uri': 'podcast_uri'
         })
     print("Dropping irrelevant columns ...")
     # df_renamed_relevant = df_renamed.drop(columns=['user_agent_decrypted', 'incognito_mode', 'offline_timestamp', 'ts', 'time_signature', 'track_href', 'analysis_url', 'acusticness'])
-    df_renamed_relevant = df_renamed.drop(columns=['offline_timestamp', 'ts', 'time_signature', 'track_href', 'analysis_url', 'acusticness'])
+    columns_to_drop = ['offline_timestamp', 'ts']
+    optional_columns_to_drop = ['time_signature', 'track_href', 'analysis_url']
+    columns_to_drop.extend([col for col in optional_columns_to_drop if col in df_renamed.columns])
+    df_renamed_relevant = df_renamed.drop(columns=columns_to_drop)
 
     print("Renaming existing columns & adding new ones ...")
     df_renamed_relevant['listening_time_in_s'] = df_renamed_relevant['listening_time_in_ms'] / 1000
     df_renamed_relevant['listening_time_in_min'] = df_renamed_relevant['listening_time_in_s'] / 60
     df_renamed_relevant['listening_time_in_h'] = df_renamed_relevant['listening_time_in_min'] / 60
-    df_renamed_relevant['song_lenght_in_s'] = df_renamed_relevant['api_song_lenght_in_ms'] / 1000
+    df_renamed_relevant['song_lenght_in_s'] = df_renamed_relevant['duration_ms'] / 1000
     df_renamed_relevant['song_lenght_in_min'] = df_renamed_relevant['song_lenght_in_s'] / 60
     df_renamed_relevant['song_lenght_in_h'] = df_renamed_relevant['song_lenght_in_min'] / 60
-    df_renamed_relevant['relation_listening_lenght'] = df_renamed_relevant["listening_time_in_ms"].div(df_renamed_relevant["api_song_lenght_in_ms"].values)
+    df_renamed_relevant['relation_listening_lenght'] = df_renamed_relevant["listening_time_in_ms"].div(df_renamed_relevant["duration_ms"].values)
     df_renamed_relevant = df_renamed_relevant[df_renamed_relevant['listening_time_in_ms'] > 0]
     df_renamed_relevant.loc[df_renamed_relevant['relation_listening_lenght'] > 1, 'relation_listening_lenght'] = 1
     print("Clearing data set from unwanted tracks ...")
