@@ -1,6 +1,6 @@
 import warnings
 import pandas as pd
-import argparse
+import click
 import os
 import sys
 
@@ -15,39 +15,50 @@ DATA_PATH = './data/out/enriched_data.parquet'
 AUDIO_FEATURES_PATH = './data/recco-audio-features/tracks_with_audio_features.csv'
 EXCLUDE_DEVICES = ['iPhone 5', 'iPhone 7', 'iPhone XS', 'Samsung Galaxy A5', 'Android Tablet', 'Sony Smart TV']
 
-# CLI arguments
-parser = argparse.ArgumentParser(description='Spotify Streaming History Analysis')
-parser.add_argument('--skip-import', action='store_true', help=f'Skip data import and modeling, load modeled data from parquet file in {DATA_PATH}')
-parser.add_argument('--load-only', action='store_true', help='Only import & model data')
-parser.add_argument('--playlists', nargs='+', default="Commute", help='A list of playlist types to generate (e.g., Commute, Workout, Study/Focus)')
-parser.add_argument('--num-songs', type=int, default=20, help='Number of songs per playlist')
-args = parser.parse_args()
+@click.command(context_settings={"show_default": True})
+@click.option('-si' ,'--skip-import', is_flag=True, help=f'Skip data import and modeling, load modeled data from parquet file in {DATA_PATH}')
+@click.option('-lo', '--load-only', is_flag=True, help='Only import & model data, then exit (no playlist generation)')
+@click.option('-p', '--playlists', multiple=True, default=["Commute"], metavar='[PLAYLIST ...]', help='One or more playlist types to generate (e.g., Commute, Workout, Study/Focus)')
+@click.option('-n', '--num-songs', default=20, show_default=True, help='Number of songs per playlist')
+@click.version_option()
+@click.help_option()
+@click.pass_context
+def main(ctx, skip_import, load_only, playlists, num_songs):
+    """
+    Spotify Streaming History Analysis
 
-# Main code
-if args.skip_import:
-    if not os.path.exists(DATA_PATH):
-        print(f"Error: {DATA_PATH} not found. Cannot skip import.")
-        sys.exit(1)
-    print(f"Skipping import and loading data from {DATA_PATH}")
-    data_df = pd.read_parquet(DATA_PATH)
-else:
-    raw_data_df = load_streaming_data()
-    audio_features_df = pd.read_csv(AUDIO_FEATURES_PATH)
-    data_df = model_data(raw_data_df, EXCLUDE_DEVICES, audio_features_df)
-    data_df.to_parquet(DATA_PATH)
-    print(f"Modeled data saved to {DATA_PATH}\n")
+    Example usage:
 
-if args.load_only:
-    print("Load only mode enabled. Exiting.")
-    sys.exit(0)
+        python main.py --skip-import -p Commute Workout -n 15
 
+    This will load the modeled data, generate both Commute and Workout playlists with 15 songs each, and print them to the terminal.
+    """
+    if skip_import:
+        if not os.path.exists(DATA_PATH):
+            click.echo(f"Error: {DATA_PATH} not found. Cannot skip import.", err=True)
+            sys.exit(1)
+        click.echo(f"Skipping import and loading data from {DATA_PATH}")
+        data_df = pd.read_parquet(DATA_PATH)
+    else:
+        raw_data_df = load_streaming_data()
+        audio_features_df = pd.read_csv(AUDIO_FEATURES_PATH)
+        data_df = model_data(raw_data_df, EXCLUDE_DEVICES, audio_features_df)
+        data_df.to_parquet(DATA_PATH)
+        click.echo(f"Modeled data saved to {DATA_PATH}\n")
 
-playlists = generate_context_playlists(data_df, args.playlists, args.num_songs)
-print("\n--- Generated Playlists ---")
-for name, tracks in playlists.items():
-    print(f"\n🎵 {name} Playlist ({len(tracks)} songs):")
-    for i, (track, artist) in enumerate(tracks, 1):
-        print(f"  {i}. {track} — {artist}")
-print("\n---------------------------\n")
+    if load_only:
+        click.echo("Load only mode enabled. Exiting.")
+        sys.exit(0)
 
-print("Done! 🎉 Check the ./data/out/ directory for the results.")
+    playlists_to_generate = list(playlists)
+    playlists_dict = generate_context_playlists(data_df, playlists_to_generate, num_songs)
+    click.echo("\n--- Generated Playlists ---")
+    for name, tracks in playlists_dict.items():
+        click.echo(f"\n🎵 {name} Playlist ({len(tracks)} songs):")
+        for i, (track, artist) in enumerate(tracks, 1):
+            click.echo(f"  {i}. {track} — {artist}")
+    click.echo("\n---------------------------\n")
+    click.echo("Done! 🎉 Check the ./data/out/ directory for the results.")
+
+if __name__ == '__main__':
+    main()

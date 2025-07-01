@@ -18,11 +18,13 @@ Based on the streaming history GDPR data request available with Spotify Europe, 
 - Language Interpreter / Engine: Python3 & IPython Notebook
 - Packages:
   - pandas
-  - matplotlib
+  - numpy
+  - pyarrow
+  - tqdm
+  - requests
+  - python-dateutil
+  - matplotlib-inline
   - seaborn
-  - plotly
-  - imageio
-  - bar_chart_race
 
 ## How to Install and Run the application
 
@@ -50,25 +52,54 @@ This will install all packages that are used in this project automatically. No n
 
 ### 4. Configuration
 
-In `main.py`, set the three constants:
+In `main.py`, you can set the following constants at the top of the file if you want:
 
-`MODELED_DATA_PATH` => the path to which you want to output your modeled data as parquet file, can be left as is
-
-`AUDIO_FEATURES_PATH` => we support analyzing your streaming history with Spotify's Audio Features API. This path can lead to a file where all audio features off all your songs lie. Note: the API is deprecated, so we dont know how it will work in the future
-
-`EXCLUDE_DEVICES` => if you shared your account with somebody ( xD ), you could exclude their device names here to hide them from your analysis
+- `DATA_PATH`: the path to which you want to output your modeled data as a parquet file (default: `./data/out/enriched_data.parquet`)
+- `AUDIO_FEATURES_PATH`: path to the CSV file with audio features for your songs (default: `./data/recco-audio-features/tracks_with_audio_features.csv`). Note: the API is deprecated, so future compatibility is uncertain.
+- `EXCLUDE_DEVICES`: a list of device names to exclude from your analysis (e.g., if you shared your account with someone else).
 
 ### 5. Run
 
-Run `main.py` to generate plots!
+Run `main.py` to generate context-responsive playlists:
+
+```
+python3 main.py
+```
 
 ### 6. CLI
 
-Run main.py from terminal like this to use CLI flags: `python3 main.py`
+You can run `main.py` from the terminal with the following CLI flags:
 
-`--skip-import`: like the name says, if you already ran main.py once, your modeled data is stored in the repo and can be used
+- `--skip-import`: Skip data import and modeling, and load modeled data from the parquet file specified in `DATA_PATH`.
+- `--load-only`: Only import and model data, then exit (no playlist generation).
+- `--playlists <name-of-playlist> [PLAYLIST ...]`: Specify one or more playlist types to generate (e.g., `Commute`, `Workout`, `Study/Focus`). Default is `Commute`.
+- `--num-songs <int>`: Number of songs per playlist (default: 20).
 
-`--import-only`: if you just want your modeled data, without plots
+**Example usage:**
+
+```
+python3 main.py --skip-import --playlists Commute Workout --num-songs 15
+```
+
+This will load the modeled data, generate both Commute and Workout playlists with 15 songs each, and print them to the terminal.
+
+
+### Feature examples
+
+number of streams → personal popularity of track
+time of day → eating, commuting, evening chill, etc
+day of week → weekday & weekend
+season → spring, fall, winter
+session gap → time between consecutive plays
+attention span → time played vs duration
+device → Home Pod for background, iPhone to sing along, etc.
+reason start & end → e.g. filter out skipped
+connection country → on vacation
+“artist loyalty” → e.g. consecutive plays of an artist / in a timeframe
+shuffle?
+Enriched with Recco beats:
+- speechiness / lyric density
+- popularity
 
 ## Credits
 
