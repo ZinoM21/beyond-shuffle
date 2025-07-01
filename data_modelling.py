@@ -1,6 +1,52 @@
 import pandas as pd
 
-def model_data(df: pd.DataFrame,  exclude_devices: list[str] = [], df_audio_features: pd.DataFrame | None = None,) -> pd.DataFrame:
+
+def get_time_of_day(hour: int) -> str:
+    if 5 <= hour < 12:
+        return 'Morning'
+    elif 12 <= hour < 17:
+        return 'Afternoon'
+    elif 17 <= hour < 21:
+        return 'Evening'
+    else:
+        return 'Night'
+
+def get_season(month: int) -> str:
+    if 3 <= month <= 5:
+        return 'Spring'
+    elif 6 <= month <= 8:
+        return 'Summer'
+    elif 9 <= month <= 11:
+        return 'Fall'
+    else:
+        return 'Winter'
+
+def feature_engineering(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Engineers features needed for context-based playlists.
+    """
+    df = df.copy()
+    print("Starting feature engineering for context playlists...")
+    df.loc[:, 'time_of_day'] = df.index.hour.map(get_time_of_day)
+    df.loc[:, 'day_of_week_nr'] = df.index.dayofweek
+    df.loc[:, 'day_of_week'] = df.index.day_name()
+    df.loc[:, 'is_weekday'] = df['day_of_week_nr'] < 5
+    df.loc[:, 'month'] = df.index.month
+    df.loc[:, 'season'] = df['month'].map(get_season)
+    df.loc[:, 'session_gap_s'] = df.index.to_series().diff().dt.total_seconds().fillna(0)
+    
+    df.loc[:, 'attention_span'] = df['relation_listening_lenght']
+    
+    if 'reason_end' in df.columns:
+        df.loc[:, 'skipped'] = df['reason_end'] == 'fwdbtn'
+    else:
+        # Fallback for skipped tracks if 'reason_end' is not available
+        df.loc[:, 'skipped'] = (df['attention_span'] < 0.1) & (df['listening_time_in_s'] < 30)
+
+    print("Feature engineering complete.")
+    return df
+
+def model_data(df: pd.DataFrame,  exclude_devices: list[str] | None = None, df_audio_features: pd.DataFrame | None = None,) -> pd.DataFrame:
     """
     Merge, clean, and process streaming data DataFrames.
     Args:
@@ -11,8 +57,8 @@ def model_data(df: pd.DataFrame,  exclude_devices: list[str] = [], df_audio_feat
         modeled_data (pd.DataFrame): The processed DataFrame
     """
     if df_audio_features is not None:
-        print(f"Modeling data with {len(df)} rows and {len(df_audio_features)} audio features rows")
-        print("Concatenating audio features to streaming data set ...")
+        print(f"""\nModeling streaming data: \nstreams: {len(df)} \nof which are unique tracks: {len(df['spotify_track_uri'].unique())} \nunique audio features: {len(df_audio_features['spotify_track_uri'].unique())}""")
+        print("\nConcatenating audio features to streaming data set ...")
         if 'spotify_track_uri' not in df_audio_features.columns:
             if 'uri' in df_audio_features.columns:
                 df_audio_features.rename({'uri': 'spotify_track_uri'}, axis=1, inplace=True)
@@ -40,8 +86,7 @@ def model_data(df: pd.DataFrame,  exclude_devices: list[str] = [], df_audio_feat
         'episode_show_name': 'podcast_show',
         })
     print("Dropping irrelevant columns ...")
-    # df_renamed_relevant = df_renamed.drop(columns=['user_agent_decrypted', 'incognito_mode', 'offline_timestamp', 'ts', 'time_signature', 'track_href', 'analysis_url', 'acusticness'])
-    columns_to_drop = ['offline_timestamp', 'ts']
+    columns_to_drop = ['offline_timestamp', 'ts', 'podcast_episode', 'podcast_show', 'spotify_episode_uri', 'audiobook_title', 'audiobook_uri', 'audiobook_chapter_title', 'audiobook_chapter_uri']
     optional_columns_to_drop = ['time_signature', 'track_href', 'analysis_url']
     columns_to_drop.extend([col for col in optional_columns_to_drop if col in df_renamed.columns])
     df_renamed_relevant = df_renamed.drop(columns=columns_to_drop)
@@ -111,22 +156,20 @@ def model_data(df: pd.DataFrame,  exclude_devices: list[str] = [], df_audio_feat
     df_renamed_devices['platform'] = df_renamed_devices.platform.str.replace(r'(^.*Partner android_tv Sony;BRAVIA4KGB.*$)', 'Sony Smart TV', regex=True)
 
 
-    if exclude_devices:
+    if exclude_devices is not None:
         print(f"Excluding devices: {exclude_devices}")
         df_cleared = df_renamed_devices[~df_renamed_devices['platform'].isin(exclude_devices)]
+        # With a little bit of research, we found that the following correlations between the name & ID of a platform:
+        # iPhone 5 == 'iPhone5,2'
+        # iPhone 7 == 'iPhone9,3'
+        # iPhone XS == 'iPhone11,2'
+        # Samsung A5 = 'samsung, SM-A520F'
+
     else:
         df_cleared = df_renamed_devices
 
+    # Perform feature engineering to prepare for context-based analysis
+    df_featured = feature_engineering(df_cleared)
 
-    # list how many tracks per platform
-    print("\nNumber of tracks per platform:")
-    print(df_cleared['platform'].value_counts(), "\n")
+    return df_featured
 
-    return df_cleared
-
-
-# # With a little bit of research, we found that the following correlations between the name & ID of a platform:
-# # iPhone 5 == 'iPhone5,2'
-# # iPhone 7 == 'iPhone9,3'
-# # iPhone XS == 'iPhone11,2'
-# # Samsung A5 = 'samsung, SM-A520F'

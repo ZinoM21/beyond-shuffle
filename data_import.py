@@ -1,5 +1,6 @@
 import pandas as pd
 import glob
+from tqdm import tqdm
 
 def load_streaming_data():
     """
@@ -7,11 +8,10 @@ def load_streaming_data():
     Returns:
         df (pd.DataFrame): Streaming history
     """
-    path = "./data/Streaming_History_Audio*.json"
+    path = "./data/in/Streaming_History_Audio*.json"
     file_list = glob.glob(path)
     data = []
-    for file in file_list:
-        print(f"Loading {file}")
+    for file in tqdm(file_list, desc="Loading streaming history files"):
         f = pd.read_json(file)
         data.append(f)
     df = pd.concat(data, ignore_index=False)
