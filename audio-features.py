@@ -145,7 +145,7 @@ def fetch_audio_feature(track):
 
 
 # FETCH AUDIO FEATURES IN PARALLEL, WITH RATE LIMIT HANDLING
-MAX_WORKERS = 2
+MAX_WORKERS = 2 # is probably enough for the recco rate limit of 120 requests per minute
 SKIP_UNTIL = 0 # can be used to skip a specific number of tracks from a previous run
 
 if SKIP_UNTIL > 0:
