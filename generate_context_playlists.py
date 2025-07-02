@@ -1,64 +1,78 @@
+from typing import Callable, Dict, List, Tuple
+
 import pandas as pd
-from typing import Dict, List
+
+from diversity import enforce_artist_diversity
+from scoring import score
+
 
 # --- Feature Functions ---
 def is_weekday(row) -> bool:
     """Return True if the row is a weekday."""
-    return row.get('is_weekday', False)
+    return row.get("is_weekday", False)
+
 
 def time_of_day(row, periods=None) -> bool:
     """Return True if the row's time_of_day is in the given periods."""
     if periods is None:
         periods = []
-    return row.get('time_of_day') in periods
+    return row.get("time_of_day") in periods
+
 
 def device_contains(row, devices=None) -> bool:
     """Return True if the platform contains any of the given devices (case-insensitive)."""
     if devices is None:
         devices = []
-    platform = str(row.get('platform', ''))
+    platform = str(row.get("platform", ""))
     return any(device.lower() in platform.lower() for device in devices)
+
 
 def not_skipped(row) -> bool:
     """Return True if the track was not skipped."""
-    return not row.get('skipped', False)
+    return not row.get("skipped", False)
+
 
 def high_energy(row, threshold=0.7) -> bool:
-    return row.get('energy', 0.0) > threshold
+    return row.get("energy", 0.0) > threshold
+
 
 def high_danceability(row, threshold=0.7) -> bool:
-    return row.get('danceability', 0.0) > threshold
+    return row.get("danceability", 0.0) > threshold
+
 
 def low_speechiness(row, threshold=0.3) -> bool:
-    return row.get('speechiness', 1.0) < threshold
+    return row.get("speechiness", 1.0) < threshold
+
 
 def high_instrumentalness(row, threshold=0.5) -> bool:
-    return row.get('instrumentalness', 0.0) > threshold
+    return row.get("instrumentalness", 0.0) > threshold
+
 
 def high_attention_span(row, threshold=0.9) -> bool:
     """Return True if the listening time over the track duration is greater than the threshold (default: 0.9 = 90% of the track duration)"""
-    return row.get('attention_span', 0.0) > threshold
+    return row.get("attention_span", 0.0) > threshold
+
 
 # --- Playlist Condition Registry ---
 # Each playlist type is a list of (feature_function, kwargs) tuples
-def playlist_conditions():
+def playlist_conditions() -> Dict[str, List[Tuple[Callable, Dict]]]:
     return {
-        'Commute': [
+        "Commute": [
             (is_weekday, {}),
-            (time_of_day, {'periods': ['Morning', 'Evening']}),
-            (device_contains, {'devices': ['iPhone', 'Android']}),
+            (time_of_day, {"periods": ["Morning", "Evening"]}),
+            (device_contains, {"devices": ["iPhone", "Android"]}),
             (not_skipped, {}),
         ],
-        'Workout': [
-            (high_energy, {'threshold': 0.7}),
-            (high_danceability, {'threshold': 0.7}),
+        "Workout": [
+            (high_energy, {"threshold": 0.7}),
+            (high_danceability, {"threshold": 0.7}),
             (not_skipped, {}),
-            (time_of_day, {'periods': ['Afternoon', 'Evening']}),
+            (time_of_day, {"periods": ["Afternoon", "Evening"]}),
         ],
-        'Focus': [
-            (low_speechiness, {'threshold': 0.3}),
-            (high_instrumentalness, {'threshold': 0.5}),
-            (high_attention_span, {'threshold': 0.9}),
+        "Focus": [
+            (low_speechiness, {"threshold": 0.3}),
+            (high_instrumentalness, {"threshold": 0.5}),
+            (high_attention_span, {"threshold": 0.9}),
             (not_skipped, {}),
         ],
     }

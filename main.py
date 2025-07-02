@@ -9,19 +9,55 @@ from data_import import load_streaming_data
 from data_modelling import model_data
 from generate_context_playlists import generate_playlists
 
-warnings.simplefilter(action='ignore', category=FutureWarning)
-warnings.simplefilter(action='ignore', category=UserWarning)
+warnings.simplefilter(action="ignore", category=FutureWarning)
+warnings.simplefilter(action="ignore", category=UserWarning)
 
-DATA_PATH = './data/out/enriched_data.parquet'
-AUDIO_FEATURES_PATH = './data/recco-audio-features/tracks_with_audio_features.csv'
-EXCLUDE_DEVICES = ['iPhone 5', 'iPhone 7', 'iPhone XS', 'Samsung Galaxy A5', 'Android Tablet', 'Sony Smart TV']
+DATA_PATH = "./data/out/enriched_data.parquet"
+AUDIO_FEATURES_PATH = "./data/recco-audio-features/tracks_with_audio_features.csv"
+EXCLUDE_DEVICES = [
+    "iPhone 5",
+    "iPhone 7",
+    "iPhone XS",
+    "Samsung Galaxy A5",
+    "Android Tablet",
+    "Sony Smart TV",
+]
+
 
 @click.command(context_settings={"show_default": True})
-@click.option('-si' ,'--skip-import', is_flag=True, help=f'Skip data import and modeling, load modeled data from parquet file in {DATA_PATH}')
-@click.option('-lo', '--load-only', is_flag=True, help='Only import & model data, then exit (no playlist generation)')
-@click.option('-p', '--playlists', multiple=True, default=["Commute"], metavar='[PLAYLIST ...]', help='One or more playlist types to generate (e.g., Commute, Workout, Study/Focus)')
-@click.option('-n', '--num-songs', default=20, show_default=True, help='Number of songs per playlist')
-@click.option('--max-per-artist', default=None, type=int, help='Maximum number of songs per artist in a playlist (default: auto, ~15% of playlist size)')
+@click.option(
+    "-si",
+    "--skip-import",
+    is_flag=True,
+    help=f"Skip data import and modeling, load modeled data from parquet file in {DATA_PATH}",
+)
+@click.option(
+    "-lo",
+    "--load-only",
+    is_flag=True,
+    help="Only import & model data, then exit (no playlist generation)",
+)
+@click.option(
+    "-p",
+    "--playlists",
+    multiple=True,
+    default=["Commute"],
+    metavar="[PLAYLIST ...]",
+    help="One or more playlist types to generate (e.g., Commute, Workout, Study/Focus)",
+)
+@click.option(
+    "-n",
+    "--num-songs",
+    default=20,
+    show_default=True,
+    help="Number of songs per playlist",
+)
+@click.option(
+    "--max-per-artist",
+    default=None,
+    type=int,
+    help="Maximum number of songs per artist in a playlist (default: auto, ~15% of playlist size)",
+)
 @click.version_option()
 @click.help_option()
 @click.pass_context
@@ -53,7 +89,9 @@ def main(ctx, skip_import, load_only, playlists, num_songs, max_per_artist):
         sys.exit(0)
 
     playlists_to_generate = list(playlists)
-    generated_playlists = generate_playlists(data_df, playlists_to_generate, num_songs, max_per_artist)
+    generated_playlists = generate_playlists(
+        data_df, playlists_to_generate, num_songs, max_per_artist
+    )
 
     click.echo("\n--- Generated Playlists ---")
     for name, tracks in generated_playlists.items():
@@ -64,5 +102,6 @@ def main(ctx, skip_import, load_only, playlists, num_songs, max_per_artist):
 
     click.echo("Done! 🎉 Check the ./data/out/ directory for the results.")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

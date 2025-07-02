@@ -1,6 +1,8 @@
-import pandas as pd
 import glob
+
+import pandas as pd
 from tqdm import tqdm
+
 
 def load_streaming_data():
     """
