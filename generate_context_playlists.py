@@ -63,27 +63,70 @@ def playlist_conditions():
         ],
     }
 
-# --- Main Playlist Generation Function ---
-def generate_context_playlists(df: pd.DataFrame, playlists_to_generate: str | List[str], num_songs: int) -> Dict[str, List[str]]:
+
+def ensure_required_columns(df: pd.DataFrame) -> None:
+    required_columns = [
+        ("energy", 0.0),
+        ("danceability", 0.0),
+        ("speechiness", 0.0),
+        ("instrumentalness", 0.0),
+        ("skipped", False),
+        ("attention_span", 0.0),
+        ("platform", ""),
+        ("time_of_day", ""),
+        ("is_weekday", False),
+    ]
+    for col, default in required_columns:
+        if col not in df.columns:
+            df[col] = default
+
+
+def get_max_per_artist(num_songs: int, max_per_artist: int | None) -> int:
+    if max_per_artist is not None:
+        return max_per_artist
+    return max(1, int(0.15 * num_songs))
+
+
+def filter_by_conditions(
+    df: pd.DataFrame, conditions: List[Tuple[Callable, Dict]]
+) -> pd.DataFrame:
+    mask = df.apply(
+        lambda row: all(func(row, **kwargs) for func, kwargs in conditions), axis=1
+    )
+    return df[mask].copy()
+
+
+def get_unique_tracks(tracks: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+    seen = set()
+    unique_tracks = []
+    for t in tracks:
+        if t not in seen:
+            unique_tracks.append(t)
+            seen.add(t)
+    return unique_tracks
+
+
+def generate_playlists(
+    df: pd.DataFrame,
+    playlists_to_generate: str | List[str],
+    num_songs: int,
+    max_per_artist: int | None = None,
+) -> Dict[str, List[str]]:
     """
     Generates context-based playlists from a feature-rich dataframe using modular feature functions.
+
+    Args:
+        df: The dataframe containing the listening history.
+        playlists_to_generate: The name(s) of the playlist(s) to generate.
+        num_songs: The number of songs to generate.
+        max_per_artist: The maximum number of songs per artist.
+
+    Returns:
+        A dictionary of playlist names and their corresponding tracks.
     """
     print("Generating context playlists...")
 
-    # Ensure required columns exist (add defaults if missing)
-    for col, default in [
-        ('energy', 0.0),
-        ('danceability', 0.0),
-        ('speechiness', 0.0),
-        ('instrumentalness', 0.0),
-        ('skipped', False),
-        ('attention_span', 0.0),
-        ('platform', ''),
-        ('time_of_day', ''),
-        ('is_weekday', False),
-    ]:
-        if col not in df.columns:
-            df[col] = default
+    ensure_required_columns(df)
 
     if isinstance(playlists_to_generate, str):
         playlists_to_generate = [playlists_to_generate]
@@ -91,33 +134,32 @@ def generate_context_playlists(df: pd.DataFrame, playlists_to_generate: str | Li
     available_playlists = playlist_conditions()
     generated_playlists = {}
 
+    max_timestamp = df.index.max().timestamp() if not df.empty else 1
+    max_per_artist = get_max_per_artist(num_songs, max_per_artist)
+
     for name in playlists_to_generate:
         name_title_case = name.title()
         if name_title_case in available_playlists:
             conditions = available_playlists[name_title_case]
-            # Build a mask by applying all feature functions
-            mask = df.apply(
-                lambda row: all(
-                    func(row, **kwargs) for func, kwargs in conditions
-                ), axis=1
+            filtered_df = filter_by_conditions(df, conditions)
+
+            scored_df = score(filtered_df, name_title_case, max_timestamp)
+            sorted_df = scored_df.sort_values("score", ascending=False)
+
+            tracks = list(zip(sorted_df["track"], sorted_df["artist"]))
+            unique_tracks = get_unique_tracks(tracks)
+            diverse_tracks = enforce_artist_diversity(
+                unique_tracks, max_per_artist=max_per_artist
             )
-            playlist_df = df[mask]
-            # Prioritize tracks by play count within the context
-            top_tracks = playlist_df['track'].value_counts().head(num_songs).index.tolist()
-            # For each top track, get the most common artist for that track in the filtered context
-            playlist_tracks = []
-            for track in top_tracks:
-                artist = (
-                    playlist_df[playlist_df['track'] == track]['artist']
-                    .mode()
-                    .iloc[0] if not playlist_df[playlist_df['track'] == track]['artist'].empty else 'Unknown Artist'
-                )
-                playlist_tracks.append((track, artist))
-            generated_playlists[name_title_case] = playlist_tracks
-            print(f"Playlist '{name_title_case}' generated with {len(playlist_tracks)} tracks.")
+            selected_tracks = diverse_tracks[
+                :num_songs
+            ]  # select the top num_songs of all tracks
+
+            generated_playlists[name_title_case] = selected_tracks
+            print(
+                f"Playlist '{name_title_case}' generated with {len(selected_tracks)} tracks. (max {max_per_artist} per artist)"
+            )
         else:
             print(f"Warning: Playlist type '{name}' not recognized. Skipped.")
 
     return generated_playlists
-
-# --- Add more feature functions and playlist types as needed for extensibility --- 

@@ -1,12 +1,13 @@
-import warnings
-import pandas as pd
-import click
 import os
 import sys
+import warnings
+
+import click
+import pandas as pd
 
 from data_import import load_streaming_data
 from data_modelling import model_data
-from generate_context_playlists import generate_context_playlists
+from generate_context_playlists import generate_playlists
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action='ignore', category=UserWarning)
@@ -20,10 +21,11 @@ EXCLUDE_DEVICES = ['iPhone 5', 'iPhone 7', 'iPhone XS', 'Samsung Galaxy A5', 'An
 @click.option('-lo', '--load-only', is_flag=True, help='Only import & model data, then exit (no playlist generation)')
 @click.option('-p', '--playlists', multiple=True, default=["Commute"], metavar='[PLAYLIST ...]', help='One or more playlist types to generate (e.g., Commute, Workout, Study/Focus)')
 @click.option('-n', '--num-songs', default=20, show_default=True, help='Number of songs per playlist')
+@click.option('--max-per-artist', default=None, type=int, help='Maximum number of songs per artist in a playlist (default: auto, ~15% of playlist size)')
 @click.version_option()
 @click.help_option()
 @click.pass_context
-def main(ctx, skip_import, load_only, playlists, num_songs):
+def main(ctx, skip_import, load_only, playlists, num_songs, max_per_artist):
     """
     Spotify Streaming History Analysis
 
@@ -51,13 +53,15 @@ def main(ctx, skip_import, load_only, playlists, num_songs):
         sys.exit(0)
 
     playlists_to_generate = list(playlists)
-    playlists_dict = generate_context_playlists(data_df, playlists_to_generate, num_songs)
+    generated_playlists = generate_playlists(data_df, playlists_to_generate, num_songs, max_per_artist)
+
     click.echo("\n--- Generated Playlists ---")
-    for name, tracks in playlists_dict.items():
+    for name, tracks in generated_playlists.items():
         click.echo(f"\n🎵 {name} Playlist ({len(tracks)} songs):")
         for i, (track, artist) in enumerate(tracks, 1):
             click.echo(f"  {i}. {track} — {artist}")
     click.echo("\n---------------------------\n")
+
     click.echo("Done! 🎉 Check the ./data/out/ directory for the results.")
 
 if __name__ == '__main__':
