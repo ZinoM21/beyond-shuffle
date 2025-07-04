@@ -86,18 +86,18 @@ This will load the modeled data, generate both Commute and Workout playlists wit
 
 ### Feature examples
 
-number of streams → personal popularity of track
-time of day → eating, commuting, evening chill, etc
-day of week → weekday & weekend
-season → spring, fall, winter
-session gap → time between consecutive plays
-attention span → time played vs duration
-device → Home Pod for background, iPhone to sing along, etc.
-reason start & end → e.g. filter out skipped
-connection country → on vacation
-“artist loyalty” → e.g. consecutive plays of an artist / in a timeframe
-shuffle?
-Enriched with Recco beats:
+- number of streams → personal popularity of track
+- time of day → eating, commuting, evening chill, etc
+- day of week → weekday & weekend
+- season → spring, fall, winter
+- session gap → time between consecutive plays
+- attention span → time played vs duration
+- device → Home Pod for background, iPhone to sing along, etc.
+- reason start & end → e.g. filter out skipped
+- connection country → on vacation
+- “artist loyalty” → e.g. consecutive plays of an artist / in a timeframe
+- shuffle?
+- Enriched with Recco beats:
 - speechiness / lyric density
 - popularity
 

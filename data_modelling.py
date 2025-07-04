@@ -29,26 +29,41 @@ def feature_engineering(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy()
     print("Starting feature engineering for context playlists...")
-    df.loc[:, "time_of_day"] = df.index.hour.map(get_time_of_day)
-    df.loc[:, "day_of_week_nr"] = df.index.dayofweek
-    df.loc[:, "day_of_week"] = df.index.day_name()
+    # Ensure index is DatetimeIndex
+    if not isinstance(df.index, pd.DatetimeIndex):
+        df.index = pd.to_datetime(df.index)
+    df.loc[:, "time_of_day"] = pd.Series(df.index.hour, index=df.index).map(
+        get_time_of_day
+    )
+    df.loc[:, "day_of_week_nr"] = pd.Series(df.index.dayofweek, index=df.index)
+    df.loc[:, "day_of_week"] = pd.Series(df.index.day_name(), index=df.index)
     df.loc[:, "is_weekday"] = df["day_of_week_nr"] < 5
-    df.loc[:, "month"] = df.index.month
+    df.loc[:, "month"] = pd.Series(df.index.month, index=df.index)
     df.loc[:, "season"] = df["month"].map(get_season)
     df.loc[:, "session_gap_s"] = (
         df.index.to_series().diff().dt.total_seconds().fillna(0)
     )
-
     df.loc[:, "attention_span"] = df["relation_listening_lenght"]
-
     if "reason_end" in df.columns:
         df.loc[:, "skipped"] = df["reason_end"] == "fwdbtn"
     else:
-        # Fallback for skipped tracks if 'reason_end' is not available
         df.loc[:, "skipped"] = (df["attention_span"] < 0.1) & (
             df["listening_time_in_s"] < 30
         )
-
+    # Personal popularity: number of times each track was played
+    df["personal_popularity"] = df.groupby("track")["track"].transform("count")
+    # Home country: most frequent country in the data
+    if "country" in df.columns:
+        home_country = df["country"].mode().iloc[0]
+        df["is_vacation"] = df["country"] != home_country
+    else:
+        df["is_vacation"] = False
+    # Artist loyalty: max consecutive plays of the same artist
+    if "artist" in df.columns:
+        artist_change = (df["artist"] != df["artist"].shift()).cumsum()
+        df["artist_loyalty"] = df.groupby(artist_change).cumcount() + 1
+    else:
+        df["artist_loyalty"] = 0
     print("Feature engineering complete.")
     return df
 

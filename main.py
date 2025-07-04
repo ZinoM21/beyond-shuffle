@@ -43,7 +43,7 @@ EXCLUDE_DEVICES = [
     multiple=True,
     default=["Commute"],
     metavar="[PLAYLIST ...]",
-    help="One or more playlist types to generate (e.g., Commute, Workout, Study/Focus)",
+    help="One or more playlist types to generate (e.g., Commute, Workout, Artist_Loyalty, Evening_Chill). Use underscores for spaces in playlist names.",
 )
 @click.option(
     "-n",
@@ -88,7 +88,7 @@ def main(ctx, skip_import, load_only, playlists, num_songs, max_per_artist):
         click.echo("Load only mode enabled. Exiting.")
         sys.exit(0)
 
-    playlists_to_generate = list(playlists)
+    playlists_to_generate = [p.replace("_", " ") for p in playlists]
     generated_playlists = generate_playlists(
         data_df, playlists_to_generate, num_songs, max_per_artist
     )
