@@ -1,14 +1,20 @@
 from typing import Dict
 
-from conditons import (
+from feature_heuristics import (
     device_contains,
     high_attention_span,
     high_danceability,
     high_energy,
     high_instrumentalness,
+    high_personal_popularity,
+    high_popularity,
+    high_valence,
+    is_vacation,
     is_weekday,
+    low_energy,
     low_speechiness,
     not_skipped,
+    season,
     time_of_day,
 )
 from scoring import (
@@ -29,7 +35,7 @@ from scoring import (
 def PLAYLIST_PRESETS() -> Dict[str, Dict]:
     return {
         "Commute": {
-            "conditions": [
+            "heuristics": [
                 (is_weekday, {}),
                 (time_of_day, {"periods": ["Morning", "Evening"]}),
                 (device_contains, {"devices": ["iPhone", "Android"]}),
@@ -38,74 +44,74 @@ def PLAYLIST_PRESETS() -> Dict[str, Dict]:
             "scoring": commute_score,
         },
         "Workout": {
-            "conditions": [
-                (high_energy, {"threshold": 0.7}),
-                (high_danceability, {"threshold": 0.7}),
+            "heuristics": [
+                (high_energy, {}),
+                (high_danceability, {}),
                 (not_skipped, {}),
                 (time_of_day, {"periods": ["Afternoon", "Evening"]}),
             ],
             "scoring": workout_score,
         },
         "Focus": {
-            "conditions": [
-                (low_speechiness, {"threshold": 0.3}),
-                (high_instrumentalness, {"threshold": 0.5}),
-                (high_attention_span, {"threshold": 0.9}),
+            "heuristics": [
+                (low_speechiness, {}),
+                (high_instrumentalness, {}),
+                (high_attention_span, {}),
                 (not_skipped, {}),
             ],
             "scoring": focus_score,
         },
         "Artist Loyalty": {
-            "conditions": [
+            "heuristics": [
                 (lambda row: row.get("artist_loyalty", 0) >= 2, {}),
             ],
             "scoring": artist_loyalty_score,
         },
         "Vacation": {
-            "conditions": [
-                (lambda row: row.get("is_vacation", False), {}),
+            "heuristics": [
+                (is_vacation, {}),
             ],
             "scoring": vacation_score,
         },
         "Background": {
-            "conditions": [
+            "heuristics": [
                 (device_contains, {"devices": ["Home Pod", "Amazon Echo", "Echo Dot"]}),
             ],
             "scoring": background_score,
         },
         "Sing Along": {
-            "conditions": [
+            "heuristics": [
                 (device_contains, {"devices": ["iPhone", "Android"]}),
-                (high_attention_span, {"threshold": 0.95}),
+                (high_attention_span, {}),
             ],
             "scoring": sing_along_score,
         },
         "Evening Chill": {
-            "conditions": [
+            "heuristics": [
                 (time_of_day, {"periods": ["Evening"]}),
-                (lambda row: row.get("energy", 1.0) < 0.5, {}),
-                (lambda row: row.get("valence", 0.0) > 0.5, {}),
+                (low_energy, {}),
+                (high_valence, {}),
             ],
             "scoring": evening_chill_score,
         },
         "Spring Vibes": {
-            "conditions": [
-                (lambda row: row.get("season", "") == "Spring", {}),
+            "heuristics": [
+                (season, {"season": ["Spring"]}),
             ],
             "scoring": spring_vibes_score,
         },
         "Weekend Party": {
-            "conditions": [
-                (lambda row: not row.get("is_weekday", True), {}),
-                (high_danceability, {"threshold": 0.7}),
-                (high_energy, {"threshold": 0.7}),
+            "heuristics": [
+                (lambda row: not is_weekday(row), {}),
+                (high_danceability, {}),
+                (high_energy, {}),
             ],
             "scoring": weekend_party_score,
         },
         "Popular Favorites": {
-            "conditions": [
-                (lambda row: row.get("personal_popularity", 0) >= 3, {}),
-                (lambda row: row.get("popularity", 0) >= 60, {}),
+            "heuristics": [
+                (high_personal_popularity, {}),
+                (high_popularity, {}),
             ],
             "scoring": popular_favorites_score,
         },

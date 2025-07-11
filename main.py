@@ -15,12 +15,14 @@ warnings.simplefilter(action="ignore", category=UserWarning)
 DATA_PATH = "./data/out/enriched_data.parquet"
 AUDIO_FEATURES_PATH = "./data/recco-audio-features/tracks_with_audio_features.csv"
 EXCLUDE_DEVICES = [
-    "iPhone 5",
+    "iPhone 5 (GSM+CDMA)",
     "iPhone 7",
     "iPhone XS",
     "Samsung Galaxy A5",
     "Android Tablet",
-    "Sony Smart TV",
+    "Hama Speaker",
+    "android",
+    "playstation",
 ]
 
 
