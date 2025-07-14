@@ -1,7 +1,5 @@
 import pandas as pd
 
-from feature_engineering import feature_engineering
-
 
 def concat_with_audio_features(
     df: pd.DataFrame, df_audio_features: pd.DataFrame
@@ -38,6 +36,10 @@ def drop_irrelevant_columns(df: pd.DataFrame) -> pd.DataFrame:
         "audiobook_uri",
         "audiobook_chapter_title",
         "audiobook_chapter_uri",
+        "offline",
+        "incognito_mode",
+        "status",
+        "message",
     ]
     optional_columns_to_drop = ["time_signature", "track_href", "analysis_url"]
     columns_to_drop.extend(
@@ -165,6 +167,15 @@ def drop_devices(df: pd.DataFrame, exclude_devices: list[str]) -> pd.DataFrame:
     return df
 
 
+def drop_empty_tracks(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Drop rows with empty or null values on the track or artist column.
+    """
+    df = df.copy()
+    df = df[df["track"].notna() & df["artist"].notna()]
+    return df
+
+
 def model_data(
     df: pd.DataFrame,
     exclude_devices: list[str] | None = None,
@@ -215,11 +226,11 @@ def model_data(
     print("Replacing special characters ...")
     df = df.replace("\\$", "S", regex=True)
 
+    df = drop_empty_tracks(df)
+
     df = rename_devices(df)
 
     if exclude_devices is not None:
         df = drop_devices(df, exclude_devices)
-
-    df = feature_engineering(df)
 
     return df
