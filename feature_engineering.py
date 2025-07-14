@@ -42,11 +42,11 @@ def add_skipping_behavior(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy()
     if "reason_end" in df.columns:
-        df.loc[:, "skipped"] = df["reason_end"] == "fwdbtn"
+        skipped_fwdbtn = df["reason_end"] == "fwdbtn"
+        skipped_short = (df["attention_span"] < 0.1) & (df["ms_played"] < 30000)
+        df.loc[:, "skipped"] = skipped_fwdbtn | skipped_short
     else:
-        df.loc[:, "skipped"] = (df["attention_span"] < 0.1) & (
-            df["listening_time_in_s"] < 30
-        )
+        df.loc[:, "skipped"] = (df["attention_span"] < 0.1) & (df["ms_played"] < 30000)
     return df
 
 
