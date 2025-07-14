@@ -94,3 +94,21 @@ def low_speechiness(row, threshold=0.3) -> bool:
 
 def high_instrumentalness(row, threshold=0.5) -> bool:
     return row.get("instrumentalness", 0.0) > threshold
+
+
+# Heuristic: is_first_played (track first played within X months of its first appearance)
+def is_first_played(row, months=2) -> bool:
+    # Assumes 'first_played_months_ago' is computed in feature_engineering
+    return row.get("first_played_months_ago", 99) <= months
+
+
+def country(row, country=None) -> bool:
+    if country is None:
+        return False
+    return str(row.get("country", "")).upper() == str(country).upper()
+
+
+def year_is(row, year=None) -> bool:
+    if year is None:
+        return False
+    return int(row.get("year", 0)) == int(year)

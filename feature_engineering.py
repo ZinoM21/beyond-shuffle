@@ -94,6 +94,25 @@ def compute_vacation_status(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def compute_first_played_months_ago(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    For each row, compute how many months ago the track was first played (relative to the row's timestamp).
+    Adds 'first_played_months_ago' column.
+    """
+    df = df.copy()
+    if "track" in df.columns:
+        # Find the first play timestamp for each track
+        first_play = df.groupby("track").apply(lambda x: x.index.min())
+        # Map to each row
+        df["first_played_timestamp"] = df["track"].map(first_play)
+        # Compute months difference
+        months_ago = (df.index.to_series() - df["first_played_timestamp"]).dt.days // 30
+        df["first_played_months_ago"] = months_ago
+    else:
+        df["first_played_months_ago"] = 99
+    return df
+
+
 def feature_engineering(df: pd.DataFrame) -> pd.DataFrame:
     """
     Engineers features needed for context-based playlists.
@@ -114,6 +133,7 @@ def feature_engineering(df: pd.DataFrame) -> pd.DataFrame:
     df.loc[:, "is_weekday"] = df["day_of_week_nr"] < 5
     df.loc[:, "month"] = pd.Series(df.index.month, index=df.index)
     df.loc[:, "season"] = df["month"].map(get_season)
+    df.loc[:, "year"] = pd.Series(df.index.year, index=df.index)
     df.loc[:, "session_gap_s"] = (
         df.index.to_series().diff().dt.total_seconds().fillna(0)
     )
@@ -129,6 +149,8 @@ def feature_engineering(df: pd.DataFrame) -> pd.DataFrame:
     df = compute_artist_loyalty(df)
 
     df = compute_vacation_status(df)
+
+    df = compute_first_played_months_ago(df)
 
     print("Feature engineering complete.")
 
