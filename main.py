@@ -7,6 +7,7 @@ import pandas as pd
 
 from data_import import load_streaming_data
 from data_modelling import model_data
+from feature_engineering import feature_engineering
 from generate_context_playlists import generate_playlists
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -73,18 +74,20 @@ def main(ctx, skip_import, load_only, playlists, num_songs, max_per_artist):
 
     This will load the modeled data, generate both Commute and Workout playlists with 15 songs each, and print them to the terminal.
     """
-    if skip_import:
+    if not skip_import:
+        raw_data_df = load_streaming_data()
+        audio_features_df = pd.read_csv(AUDIO_FEATURES_PATH)
+        modeled_data = model_data(raw_data_df, EXCLUDE_DEVICES, audio_features_df)
+        data = feature_engineering(modeled_data)
+        data.to_parquet(DATA_PATH)
+        click.echo(f"Modeled data saved to {DATA_PATH}\n")
+    else:
         if not os.path.exists(DATA_PATH):
             click.echo(f"Error: {DATA_PATH} not found. Cannot skip import.", err=True)
             sys.exit(1)
         click.echo(f"Skipping import and loading data from {DATA_PATH}")
-        data_df = pd.read_parquet(DATA_PATH)
-    else:
-        raw_data_df = load_streaming_data()
-        audio_features_df = pd.read_csv(AUDIO_FEATURES_PATH)
-        data_df = model_data(raw_data_df, EXCLUDE_DEVICES, audio_features_df)
-        data_df.to_parquet(DATA_PATH)
-        click.echo(f"Modeled data saved to {DATA_PATH}\n")
+        data = pd.read_parquet(DATA_PATH)
+        click.echo(f"Data loaded from {DATA_PATH}\n")
 
     if load_only:
         click.echo("Load only mode enabled. Exiting.")
@@ -92,7 +95,7 @@ def main(ctx, skip_import, load_only, playlists, num_songs, max_per_artist):
 
     playlists_to_generate = [p.replace("_", " ") for p in playlists]
     generated_playlists = generate_playlists(
-        data_df, playlists_to_generate, num_songs, max_per_artist
+        data, playlists_to_generate, num_songs, max_per_artist
     )
 
     click.echo("\n--- Generated Playlists ---")
