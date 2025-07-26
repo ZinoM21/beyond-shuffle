@@ -104,19 +104,21 @@ def find_periods(df: pd.DataFrame, baseline: Dict[str, Any]) -> List[Period]:
     CONSISTENCY_THRESHOLD = 0.7
     MIN_TRACKS_FOR_PLAYLIST = 30
 
+    # Create a local copy to avoid modifying the original DataFrame
+    df_local = df.copy()
     # Reset index to make 'datetime' a column, then sort
-    if "datetime" not in df.columns:
-        df = df.reset_index()
-    df["datetime"] = pd.to_datetime(df["datetime"])
-    df = df.sort_values("datetime").reset_index(drop=True)
+    if "datetime" not in df_local.columns:
+        df_local = df_local.reset_index()
+    df_local["datetime"] = pd.to_datetime(df_local["datetime"])
+    df_local = df_local.sort_values("datetime").reset_index(drop=True)
 
     detected_windows = []
 
     # --- Detect ONLY Categorical (Country) Anomalies ---
     baseline_country = baseline.get("country")
     if baseline_country:
-        for i in range(0, len(df) - WINDOW_SIZE, STEP_SIZE):
-            window = df.iloc[i : i + WINDOW_SIZE]
+        for i in range(0, len(df_local) - WINDOW_SIZE, STEP_SIZE):
+            window = df_local.iloc[i : i + WINDOW_SIZE]
             mode_result = window["country"].mode()
             if not mode_result.empty:
                 window_mode = mode_result[0]
@@ -161,7 +163,7 @@ def find_periods(df: pd.DataFrame, baseline: Dict[str, Any]) -> List[Period]:
 
     # --- Score, Filter, and Create Final Period Objects ---
     for period_data in merged_periods:
-        full_period_tracks = df.iloc[
+        full_period_tracks = df_local.iloc[
             period_data["start_index"] : period_data["end_index"]
         ]
 
@@ -258,78 +260,58 @@ def find_habits(df: pd.DataFrame, baseline: Dict[str, Any]) -> List[Habit]:
         "tempo",
     ]
     MIN_TRACKS_PER_SLOT = (
-        50  # Minimum tracks needed to consider a time slot for a habit
+        20  # Minimum tracks needed to consider a time slot for a habit
     )
-    STD_DEV_THRESHOLD = 1.1  # Lower threshold for habits as they are less intense
+    STD_DEV_THRESHOLD = 0.9  # Lower threshold for habits as they are less intense
     MAX_FEATURE_COMBINATION = 3  # Max number of features to combine for a habit
 
     # --- Group by Day of Week and Time of Day ---
     grouped = df.groupby(["day_of_week", "time_of_day"])
 
-    for (day, time_of_day), group in grouped:
-        if len(group) < MIN_TRACKS_PER_SLOT:
+    # --- Find habits by identifying the most extreme time slots ---
+    for feature in NUMERICAL_FEATURES_TO_CHECK:
+        # Calculate the mean of the feature for all time slots
+        slot_means = grouped[feature].mean().dropna()
+        if slot_means.empty:
             continue
 
-        # Find all single-feature deviations in this time slot
-        slot_deviations = []
-        for feature in NUMERICAL_FEATURES_TO_CHECK:
-            baseline_stats = baseline.get(feature)
-            if not baseline_stats:
-                continue
+        # Find the slots with the highest and lowest mean
+        highest_slot_name = slot_means.idxmax()
+        lowest_slot_name = slot_means.idxmin()
 
-            slot_mean = group[feature].mean()
-            is_high = slot_mean > baseline_stats["mean"] + (
-                STD_DEV_THRESHOLD * baseline_stats["std"]
+        # --- Create High Habit ---
+        high_group = grouped.get_group(highest_slot_name)
+        if len(high_group) >= MIN_TRACKS_PER_SLOT:
+            score = len(high_group) * slot_means.max()
+            day, time_of_day = highest_slot_name
+            habits.append(
+                Habit(
+                    name=f"Highest {feature.capitalize()} Habit",
+                    description=f"Your most consistently high-{feature} music is listened to on {day} {time_of_day}s.",
+                    score=score,
+                    tracks=high_group,
+                    contributing_features={feature: "High"},
+                    time_slot=highest_slot_name,
+                )
             )
-            is_low = slot_mean < baseline_stats["mean"] - (
-                STD_DEV_THRESHOLD * baseline_stats["std"]
+
+        # --- Create Low Habit ---
+        low_group = grouped.get_group(lowest_slot_name)
+        if len(low_group) >= MIN_TRACKS_PER_SLOT:
+            score = len(low_group) * (
+                1 - slot_means.min()
+            )  # Invert score for low values
+            day, time_of_day = lowest_slot_name
+            habits.append(
+                Habit(
+                    name=f"Lowest {feature.capitalize()} Habit",
+                    description=f"Your most consistently low-{feature} music is listened to on {day} {time_of_day}s.",
+                    score=score,
+                    tracks=low_group,
+                    contributing_features={feature: "Low"},
+                    time_slot=lowest_slot_name,
+                )
             )
-
-            if is_high or is_low:
-                slot_deviations.append(
-                    {
-                        "feature": feature,
-                        "direction": "High" if is_high else "Low",
-                        "magnitude": abs(slot_mean - baseline_stats["mean"])
-                        / baseline_stats["std"],
-                    }
-                )
-
-        # Now, create habits from combinations of these deviations
-        from itertools import combinations
-
-        for i in range(1, min(len(slot_deviations), MAX_FEATURE_COMBINATION) + 1):
-            for combo in combinations(slot_deviations, i):
-
-                contributing_features = {
-                    dev["feature"]: dev["direction"] for dev in combo
-                }
-                total_magnitude = sum(dev["magnitude"] for dev in combo)
-
-                # Scoring: based on number of tracks, magnitude, and number of combined features
-                score = (
-                    len(group) * total_magnitude * (i**2)
-                )  # i**2 to heavily favor more complex patterns
-
-                feature_names = " & ".join(
-                    [
-                        f"{dev['direction']} {dev['feature'].capitalize()}"
-                        for dev in combo
-                    ]
-                )
-                name = f"{feature_names} on {day} {time_of_day}s"
-                desc = f"A recurring habit of listening to music with these traits on {day} {time_of_day}s."
-
-                habits.append(
-                    Habit(
-                        name=name,
-                        description=desc,
-                        score=score,
-                        tracks=group,
-                        contributing_features=contributing_features,
-                        time_slot=(day, time_of_day),
-                    )
-                )
 
     return habits
 
