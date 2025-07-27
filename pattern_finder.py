@@ -3,6 +3,16 @@ from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 
+from constants import (
+    ANOMALY_THRESHOLD,
+    MIN_DURATION_DAYS,
+    MIN_TRACKS_FOR_PLAYLIST,
+    MIN_TRACKS_PER_SLOT,
+    NUMERICAL_FEATURES_TO_CHECK,
+    STEP_SIZE_DAYS,
+    WINDOW_SIZE_DAYS,
+)
+
 
 @dataclass
 class DetectedPattern:
@@ -33,6 +43,149 @@ class Habit(DetectedPattern):
     time_slot: Tuple = ()  # e.g., ('Wednesday', 'Afternoon')
 
 
+def _create_habit(
+    name: str,
+    description: str,
+    score: float,
+    tracks: pd.DataFrame,
+    feature: str,
+    direction: str,
+    time_slot: Tuple,
+) -> Habit:
+    """Helper function to create a Habit object."""
+    return Habit(
+        name=name,
+        description=description,
+        score=score,
+        tracks=tracks,
+        contributing_features={feature: direction},
+        time_slot=time_slot,
+    )
+
+
+def _detect_categorical_anomalies(
+    df: pd.DataFrame, baseline_country: str
+) -> List[Dict]:
+    """
+    Scans through listening data to find anomalous windows based on categorical features.
+    It uses a sliding window approach and returns windows where listening habits
+    deviate from the baseline.
+    """
+    detected_windows = []
+    df_sorted = df.sort_index()
+    start_date, end_date = df_sorted.index.min(), df_sorted.index.max()
+    current_date = start_date
+
+    while current_date + pd.Timedelta(days=WINDOW_SIZE_DAYS - 1) <= end_date:
+        window_end_date = current_date + pd.Timedelta(days=WINDOW_SIZE_DAYS - 1)
+        window = df_sorted.loc[current_date:window_end_date]
+
+        if window.empty:
+            current_date += pd.Timedelta(days=STEP_SIZE_DAYS)
+            continue
+
+        anomalies = {}
+        # Country anomaly
+        if "country" in window.columns:
+            country_counts = window["country"].value_counts(normalize=True)
+            for country, percentage in country_counts.items():
+                if (
+                    country != "ZZ"
+                    and country != baseline_country
+                    and percentage >= ANOMALY_THRESHOLD
+                ):
+                    anomalies["country"] = country
+
+        if anomalies:
+            detected_windows.append(
+                {
+                    "start_date": window.index.min(),
+                    "end_date": window.index.max(),
+                    "anomalies": anomalies,
+                }
+            )
+        current_date += pd.Timedelta(days=STEP_SIZE_DAYS)
+
+    return detected_windows
+
+
+def _merge_consecutive_windows(detected_windows: List[Dict]) -> List[Dict]:
+    """Merges consecutive or overlapping windows with the same anomaly."""
+    if not detected_windows:
+        return []
+
+    # Sort by start date to ensure correct merging order
+    detected_windows.sort(key=lambda x: x["start_date"])
+
+    merged_periods = []
+    current_period = detected_windows[0]
+
+    for next_window in detected_windows[1:]:
+        # Check for same anomaly and overlapping/consecutive windows
+        time_gap = next_window["start_date"] - current_period["end_date"]
+        if frozenset(next_window["anomalies"].items()) == frozenset(
+            current_period["anomalies"].items()
+        ) and time_gap <= pd.Timedelta(days=STEP_SIZE_DAYS):
+            # Merge by extending the end date
+            current_period["end_date"] = max(
+                current_period["end_date"], next_window["end_date"]
+            )
+        else:
+            # Found a new, separate period
+            merged_periods.append(current_period)
+            current_period = next_window
+
+    merged_periods.append(current_period)
+    return merged_periods
+
+
+def _create_period_from_data(
+    period_data: Dict, df: pd.DataFrame, baseline: Dict[str, Any]
+) -> Period:
+    """Creates a Period object from raw period data."""
+    start_date = period_data["start_date"]
+    end_date = period_data["end_date"]
+    period_df = df.loc[start_date:end_date].copy()
+
+    # Determine the main anomaly. For now, we just take the first one.
+    # This could be expanded to handle multiple anomalies more gracefully.
+    main_anomaly = next(iter(period_data["anomalies"].items()), (None, None))
+    anomaly_type, anomaly_value = main_anomaly
+
+    # Filter for only the tracks that contributed to the anomaly
+    contributing_tracks = period_df[period_df[anomaly_type] == anomaly_value]
+
+    unique_contributing_tracks = contributing_tracks.drop_duplicates(
+        subset=["track", "artist"], keep="first"
+    )
+
+    duration_days = (end_date - start_date).days + 1
+
+    # Scoring
+    num_features = len(period_data["anomalies"])
+    score = len(unique_contributing_tracks) * duration_days * (num_features**2)
+    if "country" in period_data["anomalies"]:
+        score *= 5
+
+    # Naming and Description
+    name = f"Country changed to {anomaly_value}"
+    desc = f"A {duration_days}-day period from {start_date.date()} to {end_date.date()} defined by {name}."
+
+    print(
+        f"Found period with {len(contributing_tracks)} streams, i.e. {len(unique_contributing_tracks)} unique tracks"
+    )
+
+    return Period(
+        name=name,
+        description=desc,
+        score=score,
+        tracks=contributing_tracks,
+        contributing_features=period_data["anomalies"],
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
 def calculate_baseline(df: pd.DataFrame) -> Dict[str, Any]:
     """
     Calculates the baseline (average) listening behavior from the dataframe.
@@ -44,11 +197,8 @@ def calculate_baseline(df: pd.DataFrame) -> Dict[str, Any]:
         A dictionary containing baseline values for key features.
     """
     baseline = {}
-
-    # Sort by datetime
     df = df.sort_values("datetime").reset_index(drop=True)
 
-    # For categorical features, the baseline is the most common value (mode)
     categorical_features = [
         "country",
         "day_of_week",
@@ -60,7 +210,6 @@ def calculate_baseline(df: pd.DataFrame) -> Dict[str, Any]:
         if col in df.columns and not df[col].empty:
             baseline[col] = df[col].mode()[0]
 
-    # For numerical audio features, the baseline is the mean and standard deviation
     numerical_features = [
         "tempo",
         "speechiness",
@@ -94,145 +243,50 @@ def find_periods(df: pd.DataFrame, baseline: Dict[str, Any]) -> List[Period]:
     Returns:
         A list of detected Period objects.
     """
-    patterns = []
-
-    # --- Configuration for Detection ---
-    # For Periods, we ONLY look for significant country changes.
-    MIN_DURATION_DAYS = 7  # A period must be at least a week long
-    WINDOW_SIZE = 100
-    STEP_SIZE = 50
-    CONSISTENCY_THRESHOLD = 0.7
-    MIN_TRACKS_FOR_PLAYLIST = 30
-
-    # Create a local copy to avoid modifying the original DataFrame
     df_local = df.copy()
-    # Reset index to make 'datetime' a column, then sort
-    if "datetime" not in df_local.columns:
-        df_local = df_local.reset_index()
-    df_local["datetime"] = pd.to_datetime(df_local["datetime"])
-    df_local = df_local.sort_values("datetime").reset_index(drop=True)
 
-    detected_windows = []
+    # Ensure df_local has a DatetimeIndex.
+    if not isinstance(df_local.index, pd.DatetimeIndex):
+        if "datetime" in df_local.columns:
+            df_local["datetime"] = pd.to_datetime(df_local["datetime"])
+            df_local = df_local.set_index("datetime")
+        else:
+            # Fallback for when the index is datetime-like but not of the correct type.
+            df_local = df_local.reset_index()
+            if "datetime" not in df_local.columns and "index" in df_local.columns:
+                df_local = df_local.rename(columns={"index": "datetime"})
 
-    # --- Detect ONLY Categorical (Country) Anomalies ---
+            if "datetime" in df_local.columns:
+                df_local["datetime"] = pd.to_datetime(df_local["datetime"])
+                df_local = df_local.set_index("datetime")
+            else:
+                raise ValueError(
+                    "DataFrame must have a 'datetime' column or a DatetimeIndex."
+                )
+
+    df_local = df_local.sort_index()
+
     baseline_country = baseline.get("country")
-    if baseline_country:
-        for i in range(0, len(df_local) - WINDOW_SIZE, STEP_SIZE):
-            window = df_local.iloc[i : i + WINDOW_SIZE]
-            mode_result = window["country"].mode()
-            if not mode_result.empty:
-                window_mode = mode_result[0]
-                if (
-                    window_mode != "ZZ"
-                    and window_mode != baseline_country
-                    and (window["country"] == window_mode).mean()
-                    >= CONSISTENCY_THRESHOLD
-                ):
-                    detected_windows.append(
-                        {
-                            "start_index": i,
-                            "end_index": i + WINDOW_SIZE,
-                            "anomalies": {"country": window_mode},
-                        }
-                    )
+    if not isinstance(baseline_country, str):
+        baseline_country = ""
+    detected_windows = _detect_categorical_anomalies(df_local, baseline_country)
 
     if not detected_windows:
         return []
 
-    # --- Merge Consecutive Windows with the SAME set of anomalies ---
-    merged_periods = []
-    # Sort windows by their anomaly set to group them for merging
-    detected_windows.sort(key=lambda x: frozenset(x["anomalies"].items()))
+    merged_periods = _merge_consecutive_windows(detected_windows)
 
-    if not detected_windows:
-        return []
-    current_period = detected_windows[0]
-    for i in range(1, len(detected_windows)):
-        next_window = detected_windows[i]
+    final_periods = []
+    for period in merged_periods:
+        period = _create_period_from_data(period, df_local, baseline)
 
         if (
-            frozenset(next_window["anomalies"].items())
-            == frozenset(current_period["anomalies"].items())
-            and next_window["start_index"] < current_period["end_index"] + STEP_SIZE
+            len(period.tracks) >= MIN_TRACKS_FOR_PLAYLIST
+            and (period.end_date - period.start_date).days + 1 >= MIN_DURATION_DAYS
         ):
-            current_period["end_index"] = next_window["end_index"]
-        else:
-            merged_periods.append(current_period)
-            current_period = next_window
-    merged_periods.append(current_period)
+            final_periods.append(period)
 
-    # --- Score, Filter, and Create Final Period Objects ---
-    for period_data in merged_periods:
-        full_period_tracks = df_local.iloc[
-            period_data["start_index"] : period_data["end_index"]
-        ]
-
-        # --- Filter for ONLY the tracks that contributed to the anomaly ---
-        contributing_tracks = full_period_tracks.copy()
-        for feature, value in period_data["anomalies"].items():
-            if value in ["High", "Low"]:
-                baseline_stats = baseline[feature]
-                if value == "High":
-                    contributing_tracks = contributing_tracks[
-                        contributing_tracks[feature]
-                        > baseline_stats["mean"] + (1.5 * baseline_stats["std"])
-                    ]
-                else:
-                    contributing_tracks = contributing_tracks[
-                        contributing_tracks[feature]
-                        < baseline_stats["mean"] - (1.5 * baseline_stats["std"])
-                    ]
-            else:
-                contributing_tracks = contributing_tracks[
-                    contributing_tracks[feature] == value
-                ]
-
-        # --- Remove duplicates and check if playlist is large enough ---
-        unique_contributing_tracks = contributing_tracks.drop_duplicates(
-            subset=["track", "artist"], keep="first"
-        )
-        if len(unique_contributing_tracks) < MIN_TRACKS_FOR_PLAYLIST:
-            continue
-
-        start_date = full_period_tracks.iloc[0]["datetime"].date()
-        end_date = full_period_tracks.iloc[-1]["datetime"].date()
-        duration_days = (end_date - start_date).days + 1
-
-        if duration_days < MIN_DURATION_DAYS:
-            continue
-
-        # Scoring: higher score for more combined features
-        num_features = len(period_data["anomalies"])
-        score = len(unique_contributing_tracks) * duration_days * (num_features**2)
-        if "country" in period_data["anomalies"]:
-            score *= 5
-        if "valence" in period_data["anomalies"]:
-            score *= 3
-
-        # --- Naming and Description ---
-        desc_parts = []
-        for feature, value in period_data["anomalies"].items():
-            if value in ["High", "Low"]:
-                desc_parts.append(f"{value} {feature.capitalize()}")
-            else:
-                desc_parts.append(f"Country changed to {value}")
-
-        name = " & ".join(desc_parts)
-        desc = f"A {duration_days}-day period from {start_date} to {end_date} defined by {name}."
-
-        patterns.append(
-            Period(
-                name=name,
-                description=desc,
-                score=score,
-                tracks=unique_contributing_tracks,
-                contributing_features=period_data["anomalies"],
-                start_date=start_date,
-                end_date=end_date,
-            )
-        )
-
-    return patterns
+    return final_periods
 
 
 def find_habits(df: pd.DataFrame, baseline: Dict[str, Any]) -> List[Habit]:
@@ -250,65 +304,45 @@ def find_habits(df: pd.DataFrame, baseline: Dict[str, Any]) -> List[Habit]:
         A list of detected Habit objects.
     """
     habits = []
-
-    # --- Configuration for Habit Detection ---
-    NUMERICAL_FEATURES_TO_CHECK = [
-        "valence",
-        "energy",
-        "danceability",
-        "acousticness",
-        "tempo",
-    ]
-    MIN_TRACKS_PER_SLOT = (
-        20  # Minimum tracks needed to consider a time slot for a habit
-    )
-    STD_DEV_THRESHOLD = 0.9  # Lower threshold for habits as they are less intense
-    MAX_FEATURE_COMBINATION = 3  # Max number of features to combine for a habit
-
-    # --- Group by Day of Week and Time of Day ---
     grouped = df.groupby(["day_of_week", "time_of_day"])
 
-    # --- Find habits by identifying the most extreme time slots ---
     for feature in NUMERICAL_FEATURES_TO_CHECK:
-        # Calculate the mean of the feature for all time slots
         slot_means = grouped[feature].mean().dropna()
         if slot_means.empty:
             continue
 
-        # Find the slots with the highest and lowest mean
         highest_slot_name = slot_means.idxmax()
         lowest_slot_name = slot_means.idxmin()
 
-        # --- Create High Habit ---
+        assert isinstance(highest_slot_name, tuple)
+        assert isinstance(lowest_slot_name, tuple)
+
         high_group = grouped.get_group(highest_slot_name)
         if len(high_group) >= MIN_TRACKS_PER_SLOT:
-            score = len(high_group) * slot_means.max()
             day, time_of_day = highest_slot_name
             habits.append(
-                Habit(
+                _create_habit(
                     name=f"Highest {feature.capitalize()} Habit",
                     description=f"Your most consistently high-{feature} music is listened to on {day} {time_of_day}s.",
-                    score=score,
+                    score=len(high_group) * slot_means.max(),
                     tracks=high_group,
-                    contributing_features={feature: "High"},
+                    feature=feature,
+                    direction="High",
                     time_slot=highest_slot_name,
                 )
             )
 
-        # --- Create Low Habit ---
         low_group = grouped.get_group(lowest_slot_name)
         if len(low_group) >= MIN_TRACKS_PER_SLOT:
-            score = len(low_group) * (
-                1 - slot_means.min()
-            )  # Invert score for low values
             day, time_of_day = lowest_slot_name
             habits.append(
-                Habit(
+                _create_habit(
                     name=f"Lowest {feature.capitalize()} Habit",
                     description=f"Your most consistently low-{feature} music is listened to on {day} {time_of_day}s.",
-                    score=score,
+                    score=len(low_group) * (1 - slot_means.min()),
                     tracks=low_group,
-                    contributing_features={feature: "Low"},
+                    feature=feature,
+                    direction="Low",
                     time_slot=lowest_slot_name,
                 )
             )

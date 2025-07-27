@@ -1,4 +1,6 @@
+import numpy as np
 import pandas as pd
+from pandas import DataFrame
 
 
 def get_time_of_day(hour: int) -> str:
@@ -28,26 +30,61 @@ def compute_attention_span(df: pd.DataFrame) -> pd.DataFrame:
     Compute the attention_span column for the DataFrame.
     - attention_span = ms_played / duration_ms, capped at 1.
     - Only keep rows where ms_played > 0.
+    - If duration_ms is missing or zero, attention_span will be pd.NA (undefined).
     """
     df = df.copy()
-    df["attention_span"] = df["ms_played"].div(df["duration_ms"].values)
+    # Set attention_span to NA where duration_ms is missing or zero
+    mask_valid = df["duration_ms"].notna() & (df["duration_ms"] != 0)
+    df["attention_span"] = pd.NA
+    df.loc[mask_valid, "attention_span"] = (
+        df.loc[mask_valid, "ms_played"] / df.loc[mask_valid, "duration_ms"]
+    )
     df = df[df["ms_played"] > 0]
     df.loc[df["attention_span"] > 1, "attention_span"] = 1
     return df
 
 
-def add_skipping_behavior(df: pd.DataFrame) -> pd.DataFrame:
+def add_skipping_behavior(input_df: pd.DataFrame) -> pd.DataFrame:
     """
     Add skipping behavior to the DataFrame.
+    This version decides the skip logic for each row based on whether 'attention_span' is available for that row.
+    - If 'attention_span' is NA: skipped if played for < 30 seconds.
+    - If 'attention_span' is not NA:
+        - If 'reason_end' column exists and is 'fwdbtn': skipped if played for < 30 seconds.
+        - Otherwise (no 'reason_end' or not 'fwdbtn'): skipped if 'attention_span' < 0.25 and played for < 30 seconds.
     """
-    df = df.copy()
+    df = input_df.copy()
+    short_play = df["ms_played"] < (30 * 1000)
+
+    # --- Define the two possible outcomes for 'skipped' based on the logic ---
+
+    # Outcome 1: Logic when attention_span IS available for a row.
     if "reason_end" in df.columns:
-        skipped_fwdbtn = df["reason_end"] == "fwdbtn"
-        skipped_short = (df["attention_span"] < 0.1) & (df["ms_played"] < 30000)
-        df.loc[:, "skipped"] = skipped_fwdbtn | skipped_short
+        # If reason_end is 'fwdbtn', that determines the skip.
+        # Otherwise, fall back to the low_attention logic.
+        low_attention_skip = (df["attention_span"] < 0.25) & short_play
+        skipped_if_not_na = np.where(
+            df["reason_end"] == "fwdbtn", short_play, low_attention_skip
+        )
     else:
-        df.loc[:, "skipped"] = (df["attention_span"] < 0.1) & (df["ms_played"] < 30000)
-    return df
+        # If reason_end doesn't exist, just use attention_span.
+        skipped_if_not_na = (df["attention_span"] < 0.25) & short_play
+
+    # Outcome 2: Logic when attention_span is NOT available for a row.
+    skipped_if_na = short_play
+
+    # --- Use np.where to choose between the two outcomes based on the condition ---
+    if "attention_span" in df.columns:
+        # The condition is whether attention_span is NA for each row.
+        is_na_condition = df["attention_span"].isna()
+        skipped = np.where(is_na_condition, skipped_if_na, skipped_if_not_na)
+    else:
+        # If the attention_span column doesn't exist, all are treated as NA.
+        skipped = skipped_if_na
+
+    output_df = input_df.copy()
+    output_df["skipped"] = pd.Series(skipped, index=df.index, dtype=bool)
+    return output_df
 
 
 def compute_personal_popularity(df: pd.DataFrame) -> pd.DataFrame:
@@ -81,17 +118,17 @@ def compute_artist_loyalty(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def compute_vacation_status(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compute the vacation status of the user.
-    """
-    df = df.copy()
-    if "country" in df.columns:
-        home_country = df["country"].mode().iloc[0]
-        df["is_vacation"] = df["country"] != home_country
-    else:
-        df["is_vacation"] = False
-    return df
+# def compute_vacation_status(df: pd.DataFrame) -> pd.DataFrame:
+#     """
+#     Compute the vacation status of the user.
+#     """
+#     df = df.copy()
+#     if "country" in df.columns:
+#         home_country = df["country"].mode().iloc[0]
+#         df["is_vacation"] = df["country"] != home_country
+#     else:
+#         df["is_vacation"] = False
+#     return df
 
 
 def compute_first_played_months_ago(df: pd.DataFrame) -> pd.DataFrame:
@@ -113,7 +150,7 @@ def compute_first_played_months_ago(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def feature_engineering(df: pd.DataFrame) -> pd.DataFrame:
+def feature_engineering(df: DataFrame) -> DataFrame:
     """
     Engineers features needed for context-based playlists.
     """
@@ -148,7 +185,7 @@ def feature_engineering(df: pd.DataFrame) -> pd.DataFrame:
 
     df = compute_artist_loyalty(df)
 
-    df = compute_vacation_status(df)
+    # df = compute_vacation_status(df)
 
     df = compute_first_played_months_ago(df)
 
