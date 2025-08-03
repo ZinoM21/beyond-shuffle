@@ -5,6 +5,7 @@ import warnings
 import click
 import pandas as pd
 
+from constants import EXCLUDE_DEVICES
 from data_import import load_streaming_data
 from data_modelling import model_data
 from feature_engineering import feature_engineering
@@ -18,16 +19,6 @@ warnings.simplefilter(action="ignore", category=UserWarning)
 
 DATA_PATH = "./data/out/enriched_data.parquet"
 AUDIO_FEATURES_PATH = "./data/recco-audio-features/tracks_with_audio_features.csv"
-EXCLUDE_DEVICES = [
-    "iPhone 5 (GSM+CDMA)",
-    "iPhone 7",
-    "iPhone XS",
-    "Samsung Galaxy A5",
-    "Android Tablet",
-    "Hama Speaker",
-    "android",
-    "playstation",
-]
 
 
 def load_data(skip_import: bool) -> pd.DataFrame:
