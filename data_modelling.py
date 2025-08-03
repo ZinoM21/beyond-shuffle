@@ -1,5 +1,7 @@
 import pandas as pd
 
+from constants import AUDIO_FEATURES_PATHS
+
 
 def concat_with_audio_features(
     df: pd.DataFrame, df_audio_features: pd.DataFrame
@@ -15,7 +17,73 @@ def concat_with_audio_features(
             raise ValueError(
                 "Neither 'spotify_track_uri' nor 'uri' column found in audio features DataFrame"
             )
+
+    # Merge the initial audio features
     df = pd.merge(df, df_audio_features, on="spotify_track_uri", how="left")
+
+    for path, id_col in AUDIO_FEATURES_PATHS.items():
+        length_before_merge = df[df["acousticness"].notna()][
+            "spotify_track_uri"
+        ].nunique()
+
+        # Identify rows with missing audio features
+        missing_features_mask = df["acousticness"].isna()
+        if not missing_features_mask.any():
+            print("No more missing audio features. Stopping merge process.")
+            break
+
+        print(f"Loading additional features from {path}...")
+        additional_df = pd.read_csv(path)
+        additional_df.rename(columns={id_col: "spotify_track_uri"}, inplace=True)
+
+        # We need to prepend 'spotify:track:' to the URI if it's not already there
+        if not additional_df["spotify_track_uri"].iloc[0].startswith("spotify:track:"):
+            additional_df["spotify_track_uri"] = (
+                "spotify:track:" + additional_df["spotify_track_uri"]
+            )
+
+        # Drop duplicates from the new features, just in case
+        additional_df.drop_duplicates(subset=["spotify_track_uri"], inplace=True)
+
+        # Merge additional features only for the rows that are missing them
+        # We'll merge into a temporary dataframe and then update the original df
+        temp_df = df[missing_features_mask][["spotify_track_uri"]].merge(
+            additional_df, on="spotify_track_uri", how="left"
+        )
+
+        # Remove tracks that didn't get any new features.
+        # The columns to check are the feature columns from the file we just loaded.
+        check_cols = additional_df.columns.drop("spotify_track_uri")
+        temp_df.dropna(subset=check_cols, how="all", inplace=True)
+
+        if temp_df.empty:
+            continue
+
+        # update() fails with duplicate indices in the 'other' frame.
+        # So we drop duplicates from temp_df before setting index.
+        temp_df.drop_duplicates(subset=["spotify_track_uri"], inplace=True)
+
+        # Set index to spotify_track_uri to update missing values
+        df.set_index("spotify_track_uri", inplace=True)
+        temp_df.set_index("spotify_track_uri", inplace=True)
+
+        # Update the main dataframe with the new features
+        df.update(temp_df)
+
+        # Reset index to get spotify_track_uri back as a column
+        df.reset_index(inplace=True)
+
+        print(
+            f'Amount of audio features added: {df[df["acousticness"].notna()]["spotify_track_uri"].nunique() - length_before_merge}'
+        )
+
+    num_unique_tracks_with_audio_features = df[df["acousticness"].notna()][
+        "spotify_track_uri"
+    ].nunique()
+    print(
+        f"\nTotal unique tracks with audio features after merging: {num_unique_tracks_with_audio_features}"
+    )
+
     return df
 
 
@@ -41,7 +109,31 @@ def drop_irrelevant_columns(df: pd.DataFrame) -> pd.DataFrame:
         "status",
         "message",
     ]
-    optional_columns_to_drop = ["time_signature", "track_href", "analysis_url"]
+    optional_columns_to_drop = [
+        "spotify_preview_url",
+        "tags",
+        "genre",
+        "track_id",
+        "source",
+        "weeks_on_chart",
+        "streams",
+        "artist_name",
+        "track_name",
+        "name",
+        "album",
+        "album_id",
+        "artists",
+        "artist_ids",
+        "track_number",
+        "disc_number",
+        "explicit",
+        "time_signature",
+        "year",
+        "release_date",
+        "time_signature",
+        "track_href",
+        "analysis_url",
+    ]
     columns_to_drop.extend(
         [col for col in optional_columns_to_drop if col in df.columns]
     )

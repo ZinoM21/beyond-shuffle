@@ -109,11 +109,9 @@ def _filter_and_sort_generic_tracks(
     Sorts tracks for a generic pattern by contextual popularity.
     """
     return (
-        tracks_with_popularity.sort_values(
-            "contextual_popularity_score", ascending=False
-        )
-        .drop_duplicates(subset=["track", "artist"])
-        .head(num_songs)
+        tracks_with_popularity.drop_duplicates(subset=["spotify_track_uri"])
+        .sort_values("contextual_popularity_score", ascending=False)
+        .head(num_songs)[["track", "artist", "contextual_popularity_score"]]
     )
 
 

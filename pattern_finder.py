@@ -213,19 +213,7 @@ def calculate_baseline(df: pd.DataFrame) -> Dict[str, Any]:
         if col in df.columns and not df[col].empty:
             baseline[col] = df[col].mode()[0]
 
-    numerical_features = [
-        "tempo",
-        "speechiness",
-        "liveness",
-        "acousticness",
-        "energy",
-        "danceability",
-        "loudness",
-        "valence",
-        "instrumentalness",
-        "popularity",
-    ]
-    for col in numerical_features:
+    for col in NUMERICAL_FEATURES_TO_CHECK:
         if col in df.columns:
             baseline[col] = {"mean": df[col].mean(), "std": df[col].std()}
 
@@ -342,7 +330,7 @@ def find_habits(df: pd.DataFrame, baseline: Dict[str, Any]) -> List[Habit]:
                 _create_habit(
                     name=f"Lowest {feature.capitalize()} Habit",
                     description=f"Your most consistently low-{feature} music is listened to on {day} {time_of_day}s.",
-                    score=len(low_group) * (1 - slot_means.min()),
+                    score=len(low_group) * slot_means.min(),
                     tracks=low_group,
                     feature=feature,
                     direction="Low",
