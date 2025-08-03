@@ -53,6 +53,9 @@ def _create_habit(
     time_slot: Tuple,
 ) -> Habit:
     """Helper function to create a Habit object."""
+    day, time_of_day = time_slot
+    name = f"{direction} {feature.capitalize()} on {day} {time_of_day}"
+
     return Habit(
         name=name,
         description=description,
@@ -168,7 +171,7 @@ def _create_period_from_data(
         score *= 5
 
     # Naming and Description
-    name = f"Country changed to {anomaly_value}"
+    name = f"Travel to {anomaly_value} ({start_date.date()} - {end_date.date()})"
     desc = f"A {duration_days}-day period from {start_date.date()} to {end_date.date()} defined by {name}."
 
     print(
