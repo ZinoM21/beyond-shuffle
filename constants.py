@@ -1,3 +1,5 @@
+DATA_PATH = "./data/out/enriched_data.parquet"
+
 EXCLUDE_DEVICES = [
     "iPhone 5 (GSM+CDMA)",
     "iPhone 7",
@@ -9,6 +11,7 @@ EXCLUDE_DEVICES = [
     "playstation",
 ]
 
+AUDIO_FEATURES_PATH = "./data/recco-audio-features/tracks_with_audio_features.csv"
 AUDIO_FEATURES_PATHS = {
     # "data/recco-audio-features/tracks_with_audio_features.csv": "spotify_track_uri",
     "data/test-features/dataset.csv": "track_id",

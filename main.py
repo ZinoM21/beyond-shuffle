@@ -5,7 +5,7 @@ import warnings
 import click
 import pandas as pd
 
-from constants import EXCLUDE_DEVICES
+from constants import DATA_PATH
 from data_import import load_streaming_data
 from data_modelling import model_data
 from feature_engineering import feature_engineering
@@ -17,16 +17,12 @@ from reporting import display_patterns, display_statistics
 warnings.simplefilter(action="ignore", category=FutureWarning)
 warnings.simplefilter(action="ignore", category=UserWarning)
 
-DATA_PATH = "./data/out/enriched_data.parquet"
-AUDIO_FEATURES_PATH = "./data/recco-audio-features/tracks_with_audio_features.csv"
 
-
-def load_data(skip_import: bool) -> pd.DataFrame:
+def load_and_model_data(skip_import: bool) -> pd.DataFrame:
     """Loads and processes the data, either from source or from a cached file."""
     if not skip_import:
         raw_data_df = load_streaming_data()
-        audio_features_df = pd.read_csv(AUDIO_FEATURES_PATH)
-        modeled_data = model_data(raw_data_df, EXCLUDE_DEVICES, audio_features_df)
+        modeled_data = model_data(raw_data_df)
         data = feature_engineering(modeled_data)
         data.to_parquet(DATA_PATH)
         click.echo(f"Modeled data saved to {DATA_PATH}\n")
@@ -89,7 +85,7 @@ def cli():
 )
 def generate(skip_import, load_only, playlists, num_songs, max_per_artist):
     """Generate playlists from predefined presets."""
-    data = load_data(skip_import)
+    data = load_and_model_data(skip_import)
 
     if load_only:
         click.echo("Data loaded. Exiting.")
@@ -127,7 +123,7 @@ def patterns(skip_import, num_songs):
     Finds and displays listening patterns (periods and habits) from the data.
     """
 
-    df = load_data(skip_import)
+    df = load_and_model_data(skip_import)
 
     click.echo("\nFinding listening patterns...")
     detected_patterns = find_patterns(df)
@@ -142,7 +138,6 @@ def patterns(skip_import, num_songs):
     top_tracks_map = process_patterns(detected_patterns, num_songs)
     display_patterns(detected_patterns, top_tracks_map)
     display_statistics(detected_patterns)
-    
 
 
 if __name__ == "__main__":

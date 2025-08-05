@@ -1,6 +1,6 @@
 import pandas as pd
 
-from constants import AUDIO_FEATURES_PATHS
+from constants import AUDIO_FEATURES_PATH, AUDIO_FEATURES_PATHS, EXCLUDE_DEVICES
 
 
 def concat_with_audio_features(
@@ -270,8 +270,6 @@ def drop_empty_tracks(df: pd.DataFrame) -> pd.DataFrame:
 
 def model_data(
     df: pd.DataFrame,
-    exclude_devices: list[str] | None = None,
-    df_audio_features: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
     Merge, clean, and process streaming data DataFrames.
@@ -287,11 +285,12 @@ def model_data(
         f"""\nModeling streaming data: \nstreams: {len(df)} \nof which are unique tracks: {len(df['spotify_track_uri'].unique())}"""
     )
 
-    if df_audio_features is not None:
+    if AUDIO_FEATURES_PATH:
+        audio_features_df = pd.read_csv(AUDIO_FEATURES_PATH)
         print(
-            f"""unique audio features: {len(df_audio_features['spotify_track_uri'].unique())}"""
+            f"""unique audio features: {len(audio_features_df['spotify_track_uri'].unique())}"""
         )
-        df = concat_with_audio_features(df, df_audio_features)
+        df = concat_with_audio_features(df, audio_features_df)
 
     print("Converting timestamp to datetime ...")
     df["datetime"] = pd.to_datetime(df["ts"])
@@ -322,7 +321,7 @@ def model_data(
 
     df = rename_devices(df)
 
-    if exclude_devices is not None:
-        df = drop_devices(df, exclude_devices)
+    if len(EXCLUDE_DEVICES) > 0:
+        df = drop_devices(df, EXCLUDE_DEVICES)
 
     return df
