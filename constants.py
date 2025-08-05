@@ -11,15 +11,16 @@ EXCLUDE_DEVICES = [
     "playstation",
 ]
 
-AUDIO_FEATURES_PATH = "./data/recco-audio-features/tracks_with_audio_features.csv"
+AUDIO_FEATURES_PATH = "./data/audio-features/reccobeats/tracks_with_audio_features.csv"
 AUDIO_FEATURES_PATHS = {
-    # "data/recco-audio-features/tracks_with_audio_features.csv": "spotify_track_uri",
-    "data/test-features/dataset.csv": "track_id",
-    "data/test-features/million-song-dataset-spotify-lastfm.csv": "spotify_id",
-    "data/test-features/spotify_top_songs_audio_features.csv": "id",
-    "data/test-features/SpotifyAudioFeaturesNov2018.csv": "track_id",
-    "data/test-features/SpotifyAudioFeaturesApril2019.csv": "track_id",
-    "data/test-features/tracks_features.csv": "id",
+    # "data/audio-features/reccobeats/tracks_with_audio_features.csv": "spotify_track_uri",
+    # "data/audio-features/beatport_features.csv": "id",
+    "data/audio-features/figueroa_features.csv": "id",
+    "data/audio-features/million_song_dataset_spotify_lastfm_2023.csv": "spotify_id",
+    "data/audio-features/orlandi_weekly_top_songs_features.csv": "id",
+    "data/audio-features/pandya_features.csv": "track_id",
+    "data/audio-features/tomigelo_april_2019_features.csv": "track_id",
+    "data/audio-features/tomigelo_november_2018_features.csv": "track_id",
 }
 
 WEIGHTS = {

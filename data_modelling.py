@@ -77,12 +77,8 @@ def concat_with_audio_features(
             f'Amount of audio features added: {df[df["acousticness"].notna()]["spotify_track_uri"].nunique() - length_before_merge}'
         )
 
-    num_unique_tracks_with_audio_features = df[df["acousticness"].notna()][
-        "spotify_track_uri"
-    ].nunique()
-    print(
-        f"\nTotal unique tracks with audio features after merging: {num_unique_tracks_with_audio_features}"
-    )
+    n_unique_af = df[df["acousticness"].notna()]["spotify_track_uri"].nunique()
+    print(f"\nTotal unique tracks with audio features after merging: {n_unique_af}\n")
 
     return df
 
@@ -288,7 +284,7 @@ def model_data(
     if AUDIO_FEATURES_PATH:
         audio_features_df = pd.read_csv(AUDIO_FEATURES_PATH)
         print(
-            f"""unique audio features: {len(audio_features_df['spotify_track_uri'].unique())}"""
+            f"""unique audio features from API: {len(audio_features_df['spotify_track_uri'].unique())}"""
         )
         df = concat_with_audio_features(df, audio_features_df)
 
@@ -323,5 +319,36 @@ def model_data(
 
     if len(EXCLUDE_DEVICES) > 0:
         df = drop_devices(df, EXCLUDE_DEVICES)
+
+    n_streams = len(df)
+    n_unique = len(df["spotify_track_uri"].unique())
+
+    # Unique tracks with more than one stream
+    unique_more_than_one = df[df["spotify_track_uri"].duplicated()][
+        "spotify_track_uri"
+    ].unique()
+    n_unique_more_than_one = len(unique_more_than_one)
+    pct_more_than_one = n_unique_more_than_one / n_unique * 100 if n_unique > 0 else 0
+
+    # Unique tracks with audio features and more than one stream
+    unique_af_more_than_one = df[
+        (df["acousticness"].notna())
+        & (df["spotify_track_uri"].isin(unique_more_than_one))
+    ]["spotify_track_uri"].unique()
+    n_unique_af_more_than_one = len(unique_af_more_than_one)
+    pct_af_more_than_one = (
+        n_unique_af_more_than_one / n_unique_more_than_one * 100
+        if n_unique_more_than_one > 0
+        else 0
+    )
+
+    print(
+        f"""\n Streaming data after preprocessing: 
+        streams: {n_streams} 
+        of which are unique tracks: {n_unique}
+        of which have more than one stream: {n_unique_more_than_one} ({pct_more_than_one:.1f}%)
+        of which have audio features: {n_unique_af_more_than_one} ({pct_af_more_than_one:.1f}%)
+        """
+    )
 
     return df

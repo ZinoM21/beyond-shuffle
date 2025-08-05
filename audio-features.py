@@ -106,7 +106,7 @@ if recco_track_infos:
         f"Found {len(recco_track_infos)} ReccoBeats track infos out of {len(uris_occuring_more_than_once)} unique tracks occuring more than once"
     )
     df_recco_track_infos = pd.DataFrame(recco_track_infos)
-    dir_path = "./data/recco-audio-features"
+    dir_path = "./data/audio-features/reccobeats"
     if not os.path.exists(dir_path):
         os.makedirs(dir_path, exist_ok=True)
     suffix = f"_{START_INDEX}_{END_INDEX if END_INDEX > 1 else len(recco_track_infos)}"
@@ -121,7 +121,7 @@ else:
 # LOAD AUDIO FEATURES FOR RECCOBEATS TRACKS FROM CSV FILES
 CHOSEN_FILE = 1
 
-recco_track_files = glob.glob("./data/recco-audio-features/track_infos_*_*.csv")
+recco_track_files = glob.glob("./data/audio-features/reccobeats/track_infos_*_*.csv")
 recco_track_files.sort()  # ensure consistent ordering
 
 if CHOSEN_FILE < 1 or CHOSEN_FILE > len(recco_track_files):
@@ -250,7 +250,7 @@ if not features:
 
 print(f"Saving {len(features)} audio features to CSV")
 
-file_name = f"./data/recco-audio-features/audio_features_{start_from_track}_to_{start_from_track + len(features) - 1 }.csv"
+file_name = f"./data/audio-features/reccobeats/audio_features_{start_from_track}_to_{start_from_track + len(features) - 1 }.csv"
 df_features = pd.DataFrame(features)
 df_features.to_csv(file_name, index=False)
 
@@ -258,7 +258,9 @@ print(f"Audio features saved to {file_name}")
 
 
 # join all audio features csv files
-audio_features_files = glob.glob("./data/recco-audio-features/audio_features_*_*.csv")
+audio_features_files = glob.glob(
+    "./data/audio-features/reccobeats/audio_features_*_*.csv"
+)
 audio_features_files.sort()
 
 recco_audio_features = pd.concat([pd.read_csv(file) for file in audio_features_files])
@@ -270,12 +272,12 @@ print(
 )
 
 recco_audio_features.to_csv(
-    "./data/recco-audio-features/audio_features.csv", index=False
+    "./data/audio-features/reccobeats/audio_features.csv", index=False
 )
 
 
 # join all track infos csv files
-track_infos_files = glob.glob("./data/recco-audio-features/track_infos_*_*.csv")
+track_infos_files = glob.glob("./data/audio-features/reccobeats/track_infos_*_*.csv")
 track_infos_files.sort()
 
 recco_track_infos = pd.concat([pd.read_csv(file) for file in track_infos_files])
@@ -285,12 +287,16 @@ print(
     f"Unique track infos: {len(recco_track_infos)} ({length_before_drop - len(recco_track_infos)} duplicates dropped)"
 )
 
-recco_track_infos.to_csv("./data/recco-audio-features/track_infos.csv", index=False)
+recco_track_infos.to_csv(
+    "./data/audio-features/reccobeats/track_infos.csv", index=False
+)
 
 
 # Join dataframes on 'id' using outer join to keep all records
-recco_track_infos = pd.read_csv("./data/recco-audio-features/track_infos.csv")
-recco_audio_features = pd.read_csv("./data/recco-audio-features/audio_features.csv")
+recco_track_infos = pd.read_csv("./data/audio-features/reccobeats/track_infos.csv")
+recco_audio_features = pd.read_csv(
+    "./data/audio-features/reccobeats/audio_features.csv"
+)
 
 
 recco_tracks_with_audio_features = pd.merge(
@@ -323,6 +329,6 @@ recco_tracks_with_audio_features = recco_tracks_with_audio_features.drop(
 
 # save to csv
 recco_tracks_with_audio_features.to_csv(
-    "./data/recco-audio-features/tracks_with_audio_features.csv", index=False
+    "./data/audio-features/reccobeats/tracks_with_audio_features.csv", index=False
 )
 print(f"Saved {len(recco_tracks_with_audio_features)} tracks with audio features")
