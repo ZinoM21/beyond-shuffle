@@ -47,11 +47,11 @@ def compute_attention_span(df: pd.DataFrame) -> pd.DataFrame:
 def add_skipping_behavior(input_df: pd.DataFrame) -> pd.DataFrame:
     """
     Add skipping behavior to the DataFrame.
-    This version decides the skip logic for each row based on whether 'attention_span' is available for that row.
+    This version decides the skip logic for each row based on whether 'attention_span' is available.
     - If 'attention_span' is NA: skipped if played for < 30 seconds.
     - If 'attention_span' is not NA:
         - If 'reason_end' column exists and is 'fwdbtn': skipped if played for < 30 seconds.
-        - Otherwise (no 'reason_end' or not 'fwdbtn'): skipped if 'attention_span' < 0.25 and played for < 30 seconds.
+        - Otherwise: skipped if 'attention_span' < 0.25 and played for < 30 seconds.
     """
     df = input_df.copy()
     short_play = df["ms_played"] < (30 * 1000)
@@ -184,8 +184,6 @@ def feature_engineering(df: DataFrame) -> DataFrame:
     df = compute_artist_popularity(df)
 
     df = compute_artist_loyalty(df)
-
-    # df = compute_vacation_status(df)
 
     df = compute_first_played_months_ago(df)
 
