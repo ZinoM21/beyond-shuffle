@@ -1,5 +1,3 @@
-DATA_PATH = "./data/out/enriched_data.parquet"
-
 EXCLUDE_DEVICES = [
     "iPhone 5 (GSM+CDMA)",
     "iPhone 7",
