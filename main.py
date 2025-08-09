@@ -18,10 +18,15 @@ warnings.simplefilter(action="ignore", category=FutureWarning)
 warnings.simplefilter(action="ignore", category=UserWarning)
 
 
-def load_and_model_data(skip_import: bool) -> pd.DataFrame:
-    """Loads and processes the data, either from source or from a cached file."""
+def load_and_model_data(skip_import: bool, input_folder_name: str) -> pd.DataFrame:
+    """Loads and processes the data, either from source or from a cached file.
+
+    Args:
+        skip_import: When True, load modeled data from cached parquet instead of importing raw JSON.
+        input_folder: Folder name under ./data containing the input JSON files (defaults handled by caller).
+    """
     if not skip_import:
-        raw_data_df = load_streaming_data()
+        raw_data_df = load_streaming_data(input_folder_name)
         modeled_data = model_data(raw_data_df)
         data = feature_engineering(modeled_data)
         data.to_parquet(DATA_PATH)
@@ -57,6 +62,14 @@ def cli():
     help=f"Skip data import and modeling, load modeled data from parquet file in {DATA_PATH}",
 )
 @click.option(
+    "-i",
+    "--input-folder",
+    default="in",
+    show_default=True,
+    metavar="FOLDER",
+    help="Name of the folder under ./data containing input JSON files",
+)
+@click.option(
     "-lo",
     "--load-only",
     is_flag=True,
@@ -83,9 +96,11 @@ def cli():
     type=int,
     help="Maximum number of songs per artist in a playlist (default: auto, ~15% of playlist size)",
 )
-def generate(skip_import, load_only, playlists, num_songs, max_per_artist):
+def generate(
+    skip_import, input_folder, load_only, playlists, num_songs, max_per_artist
+):
     """Generate playlists from predefined presets."""
-    data = load_and_model_data(skip_import)
+    data = load_and_model_data(skip_import, input_folder)
 
     if load_only:
         click.echo("Data loaded. Exiting.")
@@ -108,22 +123,41 @@ def generate(skip_import, load_only, playlists, num_songs, max_per_artist):
 
 @cli.command("find-patterns")
 @click.option(
+    "-io",
+    "--import-only",
+    is_flag=True,
+    help="Only import & model data, then exit (no pattern finding)",
+)
+@click.option(
     "-si",
     "--skip-import",
     is_flag=True,
     help=f"Skip data import and modeling, load modeled data from parquet file in {DATA_PATH}",
 )
 @click.option(
+    "-in",
+    "--input-folder",
+    default="in",
+    show_default=True,
+    metavar="FOLDER",
+    help="Name of the folder under ./data containing input JSON files",
+)
+@click.option(
+    "-n",
     "--num-songs",
     default=20,
     help="Number of top songs to include in pattern playlists.",
 )
-def patterns(skip_import, num_songs):
+def patterns(import_only, skip_import, input_folder, num_songs):
     """
     Finds and displays listening patterns (periods and habits) from the data.
     """
 
-    df = load_and_model_data(skip_import)
+    df = load_and_model_data(skip_import, input_folder)
+
+    if import_only:
+        click.echo("Data loaded. Exiting.")
+        return
 
     click.echo("\nFinding listening patterns...")
     detected_patterns = find_patterns(df)

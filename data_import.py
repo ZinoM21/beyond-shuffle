@@ -4,13 +4,14 @@ import pandas as pd
 from tqdm import tqdm
 
 
-def load_streaming_data():
+def load_streaming_data(input_folder_name: str = "in"):
     """
     Loads streaming history as DataFrame.
     Returns:
         df (pd.DataFrame): Streaming history
     """
-    path = "./data/in/Streaming_History_Audio*.json"
+    # Compose glob from provided input folder name under ./data
+    path = f"./data/{input_folder_name}/Streaming_History_Audio*.json"
     file_list = glob.glob(path)
     data = []
     for file in tqdm(file_list, desc="Loading streaming history files"):
