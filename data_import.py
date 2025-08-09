@@ -4,7 +4,7 @@ import pandas as pd
 from tqdm import tqdm
 
 
-def load_streaming_data(input_folder_name: str = "in"):
+def load_streaming_data(input_folder_name: str = "user1"):
     """
     Loads streaming history as DataFrame.
     Returns:

@@ -64,8 +64,6 @@ def cli():
 @click.option(
     "-i",
     "--input-folder",
-    default="in",
-    show_default=True,
     metavar="FOLDER",
     help="Name of the folder under ./data containing input JSON files",
 )
@@ -137,8 +135,6 @@ def generate(
 @click.option(
     "-in",
     "--input-folder",
-    default="in",
-    show_default=True,
     metavar="FOLDER",
     help="Name of the folder under ./data containing input JSON files",
 )
