@@ -6,7 +6,6 @@ import click
 import pandas as pd
 
 from candidate_selection import select_candidates
-from constants import DATA_PATH
 from data_import import load_streaming_data
 from data_modelling import model_data
 from feature_engineering import feature_engineering
@@ -25,19 +24,20 @@ def load_and_model_data(skip_import: bool, input_folder_name: str) -> pd.DataFra
         skip_import: When True, load modeled data from cached parquet instead of importing raw JSON.
         input_folder: Folder name under ./data containing the input JSON files (defaults handled by caller).
     """
+    path = f"./data/{input_folder_name}/enriched.parquet"
     if not skip_import:
         raw_data_df = load_streaming_data(input_folder_name)
         modeled_data = model_data(raw_data_df)
         data = feature_engineering(modeled_data)
-        data.to_parquet(DATA_PATH)
-        click.echo(f"Modeled data saved to {DATA_PATH}\n")
+        data.to_parquet(path)
+        click.echo(f"Modeled data saved to {path}\n")
     else:
-        if not os.path.exists(DATA_PATH):
-            click.echo(f"Error: {DATA_PATH} not found. Cannot skip import.", err=True)
+        if not os.path.exists(path):
+            click.echo(f"Error: {path} not found. Cannot skip import.", err=True)
             sys.exit(1)
-        click.echo(f"Skipping import and loading data from {DATA_PATH}")
-        data = pd.read_parquet(DATA_PATH)
-        click.echo(f"Data loaded from {DATA_PATH}\n")
+        click.echo(f"Skipping import and loading data from {path}")
+        data = pd.read_parquet(path)
+        click.echo(f"Data loaded from {path}\n")
     return data
 
 
@@ -59,7 +59,7 @@ def cli():
     "-si",
     "--skip-import",
     is_flag=True,
-    help=f"Skip data import and modeling, load modeled data from parquet file in {DATA_PATH}",
+    help="Skip data import and modeling, load modeled data from parquet file.",
 )
 @click.option(
     "-i",
@@ -130,7 +130,7 @@ def generate(
     "-si",
     "--skip-import",
     is_flag=True,
-    help=f"Skip data import and modeling, load modeled data from parquet file in {DATA_PATH}",
+    help="Skip data import and modeling, load modeled data from parquet file.",
 )
 @click.option(
     "-in",

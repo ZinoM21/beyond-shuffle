@@ -14,7 +14,7 @@ EXCLUDE_DEVICES = [
 AUDIO_FEATURES_PATH = "./data/audio-features/reccobeats/tracks_with_audio_features.csv"
 AUDIO_FEATURES_PATHS = {
     # "data/audio-features/reccobeats/tracks_with_audio_features.csv": "spotify_track_uri",
-    # "data/audio-features/beatport_features.csv": "id",
+    "data/audio-features/beatport_track_features.csv": "track_id",
     "data/audio-features/figueroa_features.csv": "id",
     "data/audio-features/million_song_dataset_spotify_lastfm_2023.csv": "spotify_id",
     "data/audio-features/orlandi_weekly_top_songs_features.csv": "id",
