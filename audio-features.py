@@ -45,7 +45,7 @@ num_unique = (
     else 0
 )
 print(
-    f"Discovered {len(user_parquet_paths)} enriched parquet files. Loaded {len(streams)} streams missing audio features, {num_unique} unique tracks"
+    f"Discovered {len(user_parquet_paths)} enriched parquet files. Loaded {len(streams_all)} streams, {len(streams)} streams missing audio features, {num_unique} unique tracks"
 )
 START_INDEX = 0
 END_INDEX = 0
