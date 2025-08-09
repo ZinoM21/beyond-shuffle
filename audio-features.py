@@ -8,13 +8,44 @@ import pandas as pd
 import requests
 from tqdm import tqdm
 
-from data_import import load_streaming_data
+# Load streaming data from all user enriched parquet files and keep only rows
+# where audio features are missing (acousticness is undefined)
+user_parquet_paths = []
+user_parquet_paths.extend(glob.glob("./data/user*/enriched.parquet"))
 
-streams = load_streaming_data()
-streams = streams.reset_index()
+if len(user_parquet_paths) == 0:
+    print("No enriched parquet files found under ./data/user*/")
+    exit()
 
+dfs = []
+for path in sorted(user_parquet_paths):
+    try:
+        df = pd.read_parquet(path)
+        dfs.append(df)
+    except Exception as e:
+        print(f"Failed to read parquet {path}: {e}")
+
+if len(dfs) == 0:
+    print("No data loaded from enriched parquet files.")
+    exit()
+
+streams_all = pd.concat(dfs, ignore_index=True)
+
+if "acousticness" in streams_all.columns:
+    streams = streams_all[streams_all["acousticness"].isna()].copy()
+else:
+    # If column not present, assume all rows are missing audio features
+    streams = streams_all.copy()
+
+streams = streams.reset_index(drop=True)
+
+num_unique = (
+    streams["spotify_track_uri"].nunique()
+    if "spotify_track_uri" in streams.columns
+    else 0
+)
 print(
-    f"Loaded {len(streams)} streams, {len(streams['spotify_track_uri'].unique())} unique tracks"
+    f"Discovered {len(user_parquet_paths)} enriched parquet files. Loaded {len(streams)} streams missing audio features, {num_unique} unique tracks"
 )
 START_INDEX = 0
 END_INDEX = 0
