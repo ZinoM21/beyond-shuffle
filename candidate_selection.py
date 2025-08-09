@@ -115,7 +115,7 @@ def _filter_and_sort_generic_tracks(
     )
 
 
-def process_patterns(
+def select_candidates(
     detected_patterns: List[DetectedPattern], num_songs: int
 ) -> Dict[str, pd.DataFrame]:
     """

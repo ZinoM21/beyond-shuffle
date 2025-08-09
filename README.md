@@ -55,7 +55,7 @@ This will install all packages that are used in this project automatically. No n
 In `main.py`, you can set the following constants at the top of the file if you want:
 
 - `DATA_PATH`: the path to which you want to output your modeled data as a parquet file (default: `./data/out/enriched_data.parquet`)
-- `AUDIO_FEATURES_PATH`: path to the CSV file with audio features for your songs (default: `./data/recco-audio-features/tracks_with_audio_features.csv`). Note: the API is deprecated, so future compatibility is uncertain.
+- `AUDIO_FEATURES_PATH`: path to the CSV file with audio features for your songs (default: `./data/audio-features/reccobeats/tracks_with_audio_features.csv`). Note: the API is deprecated, so future compatibility is uncertain.
 - `EXCLUDE_DEVICES`: a list of device names to exclude from your analysis (e.g., if you shared your account with someone else).
 
 ### 5. Run

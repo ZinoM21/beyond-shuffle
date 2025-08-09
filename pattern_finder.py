@@ -363,7 +363,4 @@ def find_patterns(df: pd.DataFrame) -> List[DetectedPattern]:
 
     print(f"Baseline profile calculated: {baseline}")
 
-    # Sort patterns by score
-    all_patterns.sort(key=lambda p: p.score, reverse=True)
-
     return all_patterns

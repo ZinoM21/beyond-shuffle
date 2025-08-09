@@ -5,13 +5,13 @@ import warnings
 import click
 import pandas as pd
 
+from candidate_selection import select_candidates
 from constants import DATA_PATH
 from data_import import load_streaming_data
 from data_modelling import model_data
 from feature_engineering import feature_engineering
 from generate_context_playlists import generate_playlists
 from pattern_finder import find_patterns
-from pattern_processing import process_patterns
 from reporting import display_patterns, display_statistics
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -135,7 +135,7 @@ def patterns(skip_import, num_songs):
         return
 
     click.echo("\nProcessing patterns...")
-    top_tracks_map = process_patterns(detected_patterns, num_songs)
+    top_tracks_map = select_candidates(detected_patterns, num_songs)
     display_patterns(detected_patterns, top_tracks_map)
     display_statistics(detected_patterns)
 
