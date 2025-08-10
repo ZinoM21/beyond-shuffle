@@ -5,83 +5,91 @@ A code base for my bachelor thesis of the same name.
 ### Table of contents
 
 - [Description](#description)
-- [Tech Stack](#technology-stack)
-- [How to Install and Run the application](#how-to-install-and-run-the-application)
+- [Technology Stack](#technology-stack)
+- [Install & Run](#how-to-install-and-run-the-application)
+- [Configuration via constants.py](#configuration)
+- [CLI usage (main.py)](#cli)
+- [Feature examples](#feature-examples)
 - [Credits](#credits)
 
 ## Description
 
-Based on the streaming history GDPR data request available with Spotify Europe, this project aimed to develop a software system that transforms a user's music streaming history into context-responsive playlists that specifically serve this purpose of memory evocation and self-reflection.
+Based on Spotify GDPR streaming-history exports, this project discovers listening patterns (periods and habits) and turns them into context‑responsive playlists that support memory evocation and self‑reflection.
 
 ## Technology Stack
 
-- Language Interpreter / Engine: Python3 & IPython Notebook
-- Packages:
-  - pandas
-  - numpy
-  - pyarrow
-  - tqdm
-  - requests
-  - python-dateutil
-  - matplotlib-inline
-  - seaborn
+- Python 3
+- Notebooks for exploration
+- Core packages (see `requirements.txt`): pandas, numpy, pyarrow, tqdm, requests, python-dateutil, seaborn, click
 
 ## How to Install and Run the application
 
-### 1. Install the latest python3 version
+### 1) Install Python 3
 
-You should install a version of python3. On Mac, it should come pre-installed but you should consider updating if you do not have a version of python3 but python2 (check your version by running `python3 --version` in the command line).
+Check with `python3 --version`. Upgrade if needed.
 
-### 2. Create a virtual environment
-
-Because the project will have some required packages like flask and we do not want to interfere with all the packages on your computer, you have to create a virtual environment. Enter `python3 -m venv venv` into the command line.
-
-> Note: It is crucial that you do this step while being in the right directory. This should be a copy of this GitHub repository on your computer.
-
-To activate your virtual environment, type `source venv/bin/activate` on Mac & Linux.
-
-(Be sure deactivate the virtual environment when you want to use the command line like normal again. Run `deactivate` for that. If the comamnd line doesn't show "(venv)" it means, the environment isn't active.)
-
-### 3. Install all required packages
-
-> Be sure that your virtual environment is activated!
-
-Then run `pip install -r requirements.txt`
-
-This will install all packages that are used in this project automatically. No need to install extra packages.
-
-### 4. Configuration
-
-In `constants.py`, you can set the following constants at the top of the file if you want:
-
-- `AUDIO_FEATURES_PATH`: path to the CSV file with audio features for your songs (default: `./data/audio-features/reccobeats/tracks_with_audio_features.csv`). Note: the API is deprecated, so future compatibility is uncertain.
-- `EXCLUDE_DEVICES`: a list of device names to exclude from your analysis (e.g., if you shared your account with someone else).
-
-### 5. Run
-
-Run `main.py` to generate context-responsive playlists:
+### 2) Create and activate a virtual environment
 
 ```
-python3 main.py
+python3 -m venv venv
+source venv/bin/activate
 ```
 
-### 6. CLI
+Deactivate with `deactivate`.
 
-You can run `main.py` from the terminal with the following CLI flags:
-
-- `--skip-import`: Skip data import and modeling, and load modeled data from the parquet file specified in `DATA_PATH`.
-- `--load-only`: Only import and model data, then exit (no playlist generation).
-- `--playlists <name-of-playlist> [PLAYLIST ...]`: Specify one or more playlist types to generate (e.g., `Commute`, `Workout`, `Study/Focus`). Default is `Commute`.
-- `--num-songs <int>`: Number of songs per playlist (default: 20).
-
-**Example usage:**
+### 3) Install dependencies
 
 ```
-python3 main.py --skip-import --playlists Commute Workout --num-songs 15
+pip install -r requirements.txt
 ```
 
-This will load the modeled data, generate both Commute and Workout playlists with 15 songs each, and print them to the terminal.
+### 4) Prepare your data
 
+Place your Spotify streaming-history JSON files under a new folder inside `./data/`, e.g. `./data/userX/`. The pipeline will read raw JSON from that folder and cache modeled data at `./data/<folder>/enriched.parquet`.
+
+## Configuration
+
+Key settings live in `constants.py`. Adjust as needed:
+
+- EXCLUDE_DEVICES: Optional list of device names to ignore during analysis. Example to enable:
+  - e.g. uncomment entries or add your own: "iPhone 7", "playstation".
+- AUDIO_FEATURES_PATHS: Mapping of enrichment CSV paths → ID column name to join on. Multiple sources can be enabled at once. Defaults include Reccobeats, Beatport, Million Song Dataset, and others.
+- CANDIDATE_SELECTION_WEIGHTS: Weights used to rank tracks within detected patterns. Defaults: count=0.5, skip_rate=0.3, attention_span=0.2.
+- Period detection: PERIOD_MIN_DAYS, WINDOW_SIZE_DAYS, STEP_SIZE_DAYS, PERIOD_FEATURE_ZSCORE_THRESHOLD, MIN_TRACKS_FOR_PLAYLIST.
+- Features to analyze: CATEGORICAL_FEATURES_TO_CHECK, NUMERICAL_FEATURES_TO_CHECK.
+- Habit detection: HABIT_MIN_WEEKS, HABIT_MIN_STREAMS_PER_SLOT, HABIT_FEATURE_ZSCORE_THRESHOLD, HABIT_MIN_NUM_FEATURES, HABIT_MAX_SLOTS_PER_SCHEMA, HABIT_TOP_PLATFORMS, audio‑cluster settings (HABIT_AUDIO_CLUSTER_K, HABIT_MIN_CLUSTER_SHARE, HABIT_MIN_CLUSTER_WEEKS), and naming thresholds (HABIT_TOP_ARTIST_SHARE, HABIT_MIN_DEVICE_SHARE).
+
+Tip: after tweaking constants, re‑run the CLI. If you rely on the cached parquet, pass `--skip-import` to avoid re‑parsing JSON.
+
+## CLI
+
+The entrypoint is `main.py`, which exposes a Click command group with the `find-patterns` subcommand.
+
+General form:
+
+```
+python3 main.py find-patterns [OPTIONS]
+```
+
+Options:
+
+- --import-only, -io: Only import & model data, then exit (no pattern finding).
+- --skip-import, -si: Skip import/modeling and load modeled data from `./data/<folder>/enriched.parquet`.
+- --input-folder, -in FOLDER: Name of the folder under `./data/` containing your input JSON (and/or the cached parquet).
+- --num-songs, -n INT: Number of top songs to include per detected pattern playlist (default: 20).
+
+Practical examples:
+
+```
+# Full pipeline from raw JSON in ./data/user1
+python3 main.py find-patterns --input-folder user1
+
+# Only build the modeled cache ./data/user1/enriched.parquet and exit
+python3 main.py find-patterns --input-folder user1 --import-only
+
+# Use the cached parquet (skips JSON parsing) and return 30 songs per pattern
+python3 main.py find-patterns --input-folder user1 --skip-import --num-songs 30
+```
 
 ### Feature examples
 
@@ -91,15 +99,12 @@ This will load the modeled data, generate both Commute and Workout playlists wit
 - season → spring, fall, winter
 - session gap → time between consecutive plays
 - attention span → time played vs duration
-- device → Home Pod for background, iPhone to sing along, etc.
-- reason start & end → e.g. filter out skipped
+- device → HomePod for background, iPhone to sing along, etc.
+- reason start & end → e.g., filter out skipped
 - connection country → on vacation
-- “artist loyalty” → e.g. consecutive plays of an artist / in a timeframe
-- shuffle?
-- Enriched with Recco beats:
-- speechiness / lyric density
-- popularity
+- “artist loyalty” → consecutive plays of an artist / within a timeframe
+- audio enrichment (e.g., via Reccobeats, Beatport, MSD) → speechiness, energy, danceability, valence, popularity
 
 ## Credits
 
-Thanks a lot to [CODE University](https://code.berlin) & our lecturer Kristian!
+Thanks a lot to [CODE University](https://code.berlin)!
