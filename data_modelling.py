@@ -3,67 +3,88 @@ import os
 import pandas as pd
 from tqdm import tqdm
 
-from constants import AUDIO_FEATURES_PATH, AUDIO_FEATURES_PATHS, EXCLUDE_DEVICES
+from constants import AUDIO_FEATURES_PATHS, EXCLUDE_DEVICES
 
 
 def concat_with_audio_features(
-    df: pd.DataFrame, df_audio_features: pd.DataFrame
+    df: pd.DataFrame,
 ) -> pd.DataFrame:
     """
     Concatenate streaming data with audio features.
     """
     print("\nConcatenating audio features to streaming data set ...")
-    if "spotify_track_uri" not in df_audio_features.columns:
-        if "uri" in df_audio_features.columns:
-            df_audio_features.rename({"uri": "spotify_track_uri"}, axis=1, inplace=True)
-        else:
-            raise ValueError(
-                "Neither 'spotify_track_uri' nor 'uri' column found in audio features DataFrame"
-            )
-
-    # Merge the initial audio features
-    df = pd.merge(df, df_audio_features, on="spotify_track_uri", how="left")
-    n_unique_af_initial = df[df["acousticness"].notna()]["spotify_track_uri"].nunique()
 
     feature_sources = list(AUDIO_FEATURES_PATHS.items())
     with tqdm(
         total=len(feature_sources), desc="Loading additional features", unit="file"
     ) as pbar:
         for path, id_col in feature_sources:
-            length_before_merge = df[df["acousticness"].notna()][
-                "spotify_track_uri"
-            ].nunique()
+            has_acousticness = "acousticness" in df.columns
+            missing_features_mask = None
 
-            # Identify rows with missing audio features
-            missing_features_mask = df["acousticness"].isna()
-            if not missing_features_mask.any():
-                pbar.write("No more missing audio features. Stopping merge process.")
-                break
+            if has_acousticness:
+                length_before_merge = df[df["acousticness"].notna()][
+                    "spotify_track_uri"
+                ].nunique()
+                missing_features_mask = df["acousticness"].isna()
+                if not missing_features_mask.any():
+                    pbar.write(
+                        "No more missing audio features. Stopping merge process."
+                    )
+                    break
+            else:
+                # No acousticness column yet -> we'll merge features for ALL rows (no mask)
+                length_before_merge = 0
 
             pbar.set_description(f"Reading {os.path.basename(path)[:20]}...")
-            additional_df = pd.read_csv(path)
-            additional_df.rename(columns={id_col: "spotify_track_uri"}, inplace=True)
+            audio_features_df = pd.read_csv(path)
+            if id_col not in audio_features_df.columns:
+                raise ValueError(
+                    f"Column {id_col} not found in audio features DataFrame"
+                )
+
+            audio_features_df.rename(
+                columns={id_col: "spotify_track_uri"}, inplace=True
+            )
 
             # We need to prepend 'spotify:track:' to the URI if it's not already there
-            if not additional_df.empty and not additional_df[
+            if not audio_features_df.empty and not audio_features_df[
                 "spotify_track_uri"
             ].astype(str).iloc[0].startswith("spotify:track:"):
-                additional_df["spotify_track_uri"] = "spotify:track:" + additional_df[
-                    "spotify_track_uri"
-                ].astype(str)
+                audio_features_df["spotify_track_uri"] = (
+                    "spotify:track:"
+                    + audio_features_df["spotify_track_uri"].astype(str)
+                )
 
             # Drop duplicates from the new features, just in case
-            additional_df.drop_duplicates(subset=["spotify_track_uri"], inplace=True)
-
-            # Merge additional features only for the rows that are missing them
-            # We'll merge into a temporary dataframe and then update the original df
-            temp_df = df[missing_features_mask][["spotify_track_uri"]].merge(
-                additional_df, on="spotify_track_uri", how="left"
+            audio_features_df.drop_duplicates(
+                subset=["spotify_track_uri"], inplace=True
             )
+
+            # Prepare a temporary dataframe for merging new features
+            if has_acousticness:
+                # Merge only for rows missing audio features
+                temp_df = df[missing_features_mask][["spotify_track_uri"]].merge(
+                    audio_features_df, on="spotify_track_uri", how="left"
+                )
+            else:
+                # Ensure destination columns exist so update() can populate them without suffixes
+                feature_cols = [
+                    col
+                    for col in audio_features_df.columns
+                    if col != "spotify_track_uri"
+                ]
+                for col in feature_cols:
+                    if col not in df.columns:
+                        df[col] = pd.NA
+                # Merge for ALL rows (no mask)
+                temp_df = df[["spotify_track_uri"]].merge(
+                    audio_features_df, on="spotify_track_uri", how="left"
+                )
 
             # Remove tracks that didn't get any new features.
             # The columns to check are the feature columns from the file we just loaded.
-            check_cols = additional_df.columns.drop("spotify_track_uri")
+            check_cols = audio_features_df.columns.drop("spotify_track_uri")
             temp_df.dropna(subset=check_cols, how="all", inplace=True)
 
             if temp_df.empty:
@@ -85,17 +106,23 @@ def concat_with_audio_features(
             # Reset index to get spotify_track_uri back as a column
             df.reset_index(inplace=True)
 
-            amount_added = (
-                df[df["acousticness"].notna()]["spotify_track_uri"].nunique()
-                - length_before_merge
-            )
+            if "acousticness" in df.columns:
+                amount_added = (
+                    df[df["acousticness"].notna()]["spotify_track_uri"].nunique()
+                    - length_before_merge
+                )
+            else:
+                # Fallback: number of URIs we just populated with any features from this file
+                amount_added = int(temp_df.index.nunique())
+
             pbar.set_postfix({"added": int(amount_added)})
             pbar.update(1)
 
-    n_unique_af = df[df["acousticness"].notna()]["spotify_track_uri"].nunique()
-    print(
-        f"Unique audio features from files added: {max(n_unique_af - n_unique_af_initial, 0)}"
-    )
+    if "acousticness" in df.columns:
+        n_unique_af = df[df["acousticness"].notna()]["spotify_track_uri"].nunique()
+    else:
+        n_unique_af = 0
+
     print(f"\nTotal unique tracks with audio features after merging: {n_unique_af}\n")
 
     return df
@@ -120,10 +147,10 @@ def drop_irrelevant_columns(df: pd.DataFrame) -> pd.DataFrame:
         "audiobook_chapter_uri",
         "offline",
         "incognito_mode",
-        "status",
-        "message",
     ]
     optional_columns_to_drop = [
+        "status",
+        "message",
         "spotify_preview_url",
         "tags",
         "genre",
@@ -310,30 +337,15 @@ def model_data(
     # Initial stats (before preprocessing)
     n_streams_initial = len(df)
     n_unique_initial = len(df["spotify_track_uri"].unique())
-    unique_more_than_one_initial = df[df["spotify_track_uri"].duplicated()][
-        "spotify_track_uri"
-    ].unique()
-    n_unique_more_than_one_initial = len(unique_more_than_one_initial)
-    pct_more_than_one_initial = (
-        n_unique_more_than_one_initial / n_unique_initial * 100
-        if n_unique_initial > 0
-        else 0
-    )
 
     print(
         f"""\nModeling streaming data (from {date_from_str} to {date_to_str}): 
         streams: {n_streams_initial} 
         of which are unique tracks: {n_unique_initial}
-        of which have more than one stream: {n_unique_more_than_one_initial} ({pct_more_than_one_initial:.1f}%)
         """
     )
 
-    if AUDIO_FEATURES_PATH:
-        audio_features_df = pd.read_csv(AUDIO_FEATURES_PATH)
-        print(
-            f"""unique audio features from API: {len(audio_features_df['spotify_track_uri'].unique())}"""
-        )
-        df = concat_with_audio_features(df, audio_features_df)
+    df = concat_with_audio_features(df)
 
     print("Converting timestamp to datetime ...")
     df["datetime"] = pd.to_datetime(df["ts"])
@@ -368,33 +380,21 @@ def model_data(
         df = drop_devices(df, EXCLUDE_DEVICES)
 
     n_streams = len(df)
-    n_unique = len(df["spotify_track_uri"].unique())
+    unique = df["spotify_track_uri"].unique()
+    n_unique = len(unique)
 
-    # Unique tracks with more than one stream
-    unique_more_than_one = df[df["spotify_track_uri"].duplicated()][
-        "spotify_track_uri"
-    ].unique()
-    n_unique_more_than_one = len(unique_more_than_one)
-    pct_more_than_one = n_unique_more_than_one / n_unique * 100 if n_unique > 0 else 0
-
-    # Unique tracks with audio features and more than one stream
-    unique_af_more_than_one = df[
-        (df["acousticness"].notna())
-        & (df["spotify_track_uri"].isin(unique_more_than_one))
+    # Unique tracks with audio features
+    unique_af = df[
+        (df["acousticness"].notna()) & (df["spotify_track_uri"].isin(unique))
     ]["spotify_track_uri"].unique()
-    n_unique_af_more_than_one = len(unique_af_more_than_one)
-    pct_af_more_than_one = (
-        n_unique_af_more_than_one / n_unique_more_than_one * 100
-        if n_unique_more_than_one > 0
-        else 0
-    )
+    n_unique_af = len(unique_af)
+    pct_af = n_unique_af / n_unique * 100 if n_unique > 0 else 0
 
     print(
         f"""\nStreaming data after preprocessing: 
         streams: {n_streams} 
         of which are unique tracks: {n_unique}
-        of which have more than one stream: {n_unique_more_than_one} ({pct_more_than_one:.1f}%)
-        of which have audio features: {n_unique_af_more_than_one} ({pct_af_more_than_one:.1f}%)
+        of which have audio features: {n_unique_af} ({pct_af:.1f}%)
         """
     )
 
