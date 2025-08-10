@@ -172,7 +172,7 @@ def _create_period_from_data(
 
     # Naming and Description
     name = f"Travel to {anomaly_value} ({start_date.date()} - {end_date.date()})"
-    desc = f"A {duration_days}-day period from {start_date.date()} to {end_date.date()} defined by {name}."
+    desc = f"A {duration_days}-day period defined by {name}."
 
     print(
         f"Found period with {len(contributing_tracks)} streams, i.e. {len(unique_contributing_tracks)} unique tracks"
