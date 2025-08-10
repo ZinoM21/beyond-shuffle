@@ -1,15 +1,80 @@
 import glob
+import math
 import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import requests
 from tqdm import tqdm
 
-# Load streaming data from all user enriched parquet files and keep only rows
-# where audio features are missing (acousticness is undefined)
+# -------------------- Robustness utilities --------------------
+OUTAGE_RETRY_SECONDS = 30
+OUTAGE_EXIT_AFTER_SECONDS = 30 * 60
+
+
+class NetworkOutageExceededError(Exception):
+    pass
+
+
+def ensure_dir(path: str) -> None:
+    if not os.path.exists(path):
+        os.makedirs(path, exist_ok=True)
+
+
+def sanitize_for_filename(text: str, max_len: int = 60) -> str:
+    text = re.sub(r"[^a-zA-Z0-9._-]+", "_", str(text))
+    if len(text) > max_len:
+        return text[: max_len - 3] + "..."
+    return text
+
+
+def robust_get(url: str, timeout: Optional[int] = None) -> requests.Response:
+    """Perform GET with retry on network outages.
+
+    - Retries every 30s on ConnectionError/Timeout
+    - Gives up after 30 minutes and raises NetworkOutageExceededError
+    - Does NOT special-case HTTP 429; caller keeps existing rate-limit logic
+    """
+    start = time.monotonic()
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            return requests.get(url, timeout=timeout)
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            elapsed = time.monotonic() - start
+            if elapsed >= OUTAGE_EXIT_AFTER_SECONDS:
+                raise NetworkOutageExceededError(
+                    f"Network unavailable for {int(elapsed)}s while requesting {url}"
+                ) from e
+            wait_left = OUTAGE_EXIT_AFTER_SECONDS - elapsed
+            wait = OUTAGE_RETRY_SECONDS
+            if wait > wait_left:
+                wait = max(1, int(wait_left))
+            print(
+                f"Network issue on attempt {attempt} for {url}: {e}. "
+                f"Retrying in {wait}s (will give up after {int(wait_left)}s)."
+            )
+            time.sleep(wait)
+
+
+def save_checkpoint_csv(records: List[Dict[str, Any]], filepath: str) -> None:
+    if not records:
+        return
+    df = pd.DataFrame(records)
+    ensure_dir(os.path.dirname(filepath))
+    df.to_csv(filepath, index=False)
+
+
+# Shared temp dir for checkpoints used by both phases
+TMP_DIR = "./data/audio-features/reccobeats/tmp"
+ensure_dir(TMP_DIR)
+
+## Phase 1:
+# -------------------- FETCH TRACK INFOS WHERE AUDIO FEATURES ARE MISSING --------------------
 user_parquet_paths = []
 user_parquet_paths.extend(glob.glob("./data/user*/enriched.parquet"))
 
@@ -58,16 +123,10 @@ uris = streams["spotify_track_uri"]
 uris_by_occurence = uris.value_counts()
 print(f"Total unique tracks: {len(uris_by_occurence)}")
 
-# Occuring more than once
-uris_occuring_more_than_once = uris_by_occurence[uris_by_occurence >= 2]
-print(
-    f"Tracks occuring more than once: {len(uris_occuring_more_than_once)} / {len(uris_by_occurence)}"
-)
-
-# Prepare batches
+# Prepare batches (use ALL unique tracks)
 spotify_ids = [
     uri.split(":")[-1]
-    for uri in uris_occuring_more_than_once.index[
+    for uri in uris_by_occurence.index[
         START_INDEX : END_INDEX if END_INDEX > 1 else None
     ]
 ]
@@ -79,62 +138,98 @@ print(
 )
 
 
-# FETCH RECCOBEATS TRACK INFO FOR EACH BATCH OF IDS, WITH RATE LIMIT HANDLING AND TQDM PROGRESS BAR
 RECCO_BASE_URL = "https://api.reccobeats.com/v1"
 
-recco_track_infos = []
+recco_track_infos: List[Dict[str, Any]] = []
 total_batches = len(id_batches)
 batch_idx = 0
 
-# Use tqdm manual mode to update progress even if we retry a batch
-with tqdm(total=total_batches, desc="Fetching ReccoBeats track info") as pbar:
-    while batch_idx < total_batches:
-        batch = id_batches[batch_idx]
-        ids_param = ",".join(batch)
-        url = f"{RECCO_BASE_URL}/track?ids={ids_param}"
-        try:
-            response = requests.get(url)
-            pbar.set_postfix_str(f"Batch {batch_idx}, status: {response.status_code}")
-            if response.status_code == 200:
-                data = response.json()
-                if (
-                    isinstance(data, dict)
-                    and "content" in data
-                    and isinstance(data["content"], list)
-                ):
-                    recco_track_infos.extend(data["content"])
+# checkpoint setup (every 5%)
+TMP_DIR = "./data/audio-features/reccobeats/tmp"
+ensure_dir(TMP_DIR)
+checkpoint_stride_batches = (
+    max(1, math.ceil(total_batches * 0.05)) if total_batches > 0 else 1
+)
+last_checkpoint_at_batch = 0
+
+try:
+    # Use tqdm manual mode to update progress even if we retry a batch
+    with tqdm(total=total_batches, desc="Fetching ReccoBeats track info") as pbar:
+        while batch_idx < total_batches:
+            batch = id_batches[batch_idx]
+            ids_param = ",".join(batch)
+            url = f"{RECCO_BASE_URL}/track?ids={ids_param}"
+            try:
+                response = robust_get(url)
+                pbar.set_postfix_str(
+                    f"Batch {batch_idx}, status: {response.status_code}"
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if (
+                        isinstance(data, dict)
+                        and "content" in data
+                        and isinstance(data["content"], list)
+                    ):
+                        recco_track_infos.extend(data["content"])
+                    batch_idx += 1
+                    pbar.update(1)
+                    time.sleep(0.05)
+                elif response.status_code == 429:
+                    retry_after_header = response.headers.get("Retry-After")
+                    if retry_after_header is None:
+                        raise ValueError(f"No Retry-After header for batch {batch_idx}")
+                    match = re.search(r"\d+", str(retry_after_header))
+                    if match is None:
+                        raise ValueError(
+                            f"Could not extract number of seconds from Retry-After header for batch {batch_idx}. The header was: {retry_after_header}"
+                        )
+                    retry_after = int(match.group(0))
+                    pbar.set_postfix_str(
+                        f"Rate limit for batch {batch_idx}: waiting {retry_after}s"
+                    )
+                    time.sleep(retry_after)
+                    continue  # Retry the same batch
+                else:
+                    raise ValueError(
+                        f"Request failed for batch {batch_idx}: {response.status_code}"
+                    )
+            except Exception as e:
+                print(f"Exception for batch {batch_idx}: {e}")
                 batch_idx += 1
                 pbar.update(1)
                 time.sleep(0.05)
-            elif response.status_code == 429:
-                retry_after_header = response.headers.get("Retry-After")
-                if retry_after_header is None:
-                    raise ValueError(f"No Retry-After header for batch {batch_idx}")
-                match = re.search(r"\d+", str(retry_after_header))
-                if match is None:
-                    raise ValueError(
-                        f"Could not extract number of seconds from Retry-After header for batch {batch_idx}. The header was: {retry_after_header}"
-                    )
-                retry_after = int(match.group(0))
-                pbar.set_postfix_str(
-                    f"Rate limit for batch {batch_idx}: waiting {retry_after}s"
+
+            # periodic checkpoint every 5% of batches progressed
+            progressed_batches = batch_idx
+            if (
+                progressed_batches - last_checkpoint_at_batch
+                >= checkpoint_stride_batches
+            ):
+                checkpoint_path = os.path.join(
+                    TMP_DIR,
+                    f"track_infos_checkpoint_{progressed_batches}_of_{total_batches}.csv",
                 )
-                time.sleep(retry_after)
-                continue  # Retry the same batch
-            else:
-                raise ValueError(
-                    f"Request failed for batch {batch_idx}: {response.status_code}"
-                )
-        except Exception as e:
-            print(f"Exception for batch {batch_idx}: {e}")
-            batch_idx += 1
-            pbar.update(1)
-            time.sleep(0.05)
+                save_checkpoint_csv(recco_track_infos, checkpoint_path)
+                last_checkpoint_at_batch = progressed_batches
+except NetworkOutageExceededError as e:
+    # save and exit
+    error_suffix = sanitize_for_filename(type(e).__name__)
+    err_path = f"./data/audio-features/reccobeats/track_infos.error_{error_suffix}.csv"
+    save_checkpoint_csv(recco_track_infos, err_path)
+    print(str(e))
+    raise SystemExit(1)
+except Exception as e:
+    error_suffix = sanitize_for_filename(type(e).__name__)
+    err_path = f"./data/audio-features/reccobeats/track_infos.error_{error_suffix}.csv"
+    save_checkpoint_csv(recco_track_infos, err_path)
+    print(f"Unhandled error; progress saved to {err_path}")
+    raise SystemExit(1)
 
 # Save track info to CSV
 if recco_track_infos:
     print(
-        f"Found {len(recco_track_infos)} ReccoBeats track infos out of {len(uris_occuring_more_than_once)} unique tracks occuring more than once"
+        f"Found {len(recco_track_infos)} ReccoBeats track infos out of {len(uris_by_occurence)} unique tracks"
     )
     df_recco_track_infos = pd.DataFrame(recco_track_infos)
     dir_path = "./data/audio-features/reccobeats"
@@ -149,7 +244,8 @@ else:
     print("No ReccoBeats track info fetched.")
 
 
-# LOAD AUDIO FEATURES FOR RECCOBEATS TRACKS FROM CSV FILES
+## Phase 2:
+# -------------------- LOAD TRACK INFO FOR RECCOBEATS AUDIO FEATURES FROM CSV FILES --------------------
 CHOSEN_FILE = 1
 
 recco_track_files = glob.glob("./data/audio-features/reccobeats/track_infos_*_*.csv")
@@ -163,19 +259,23 @@ if CHOSEN_FILE < 1 or CHOSEN_FILE > len(recco_track_files):
 
 selected_file = recco_track_files[CHOSEN_FILE - 1]
 
-match = re.search(r"track_infos_(\d+)_(\d+)\.csv", selected_file)
+match = re.search(r"track_infos_(\d+)_(\d+)\.csv", os.path.basename(selected_file))
 if not match:
-    print("Could not extract indices from filename")
-    exit()
-
-start_from_track = int(match.group(1))
-end_to_track = int(match.group(2))
-print(f"Processing file {CHOSEN_FILE}: {selected_file}")
+    # Allow arbitrary filenames; default to generic index range
+    start_from_track = 821
+    end_to_track = 0
+    print(
+        "Filename does not match track_infos_<start>_<end>.csv; numbering will start at 1."
+    )
+else:
+    start_from_track = int(match.group(1))
+    end_to_track = int(match.group(2))
+print(f"Processing file: {selected_file}")
 print(f"Start index: {start_from_track}, End index: {end_to_track}")
 
 # Load track info from selected CSV
 df_tracks = pd.read_csv(selected_file)
-recco_track_infos = df_tracks.to_dict("records")
+tracks_for_features = df_tracks.to_dict("records")
 
 
 # DEFINE FUNCTION TO FETCH AUDIO FEATURES
@@ -188,7 +288,7 @@ def fetch_audio_feature(track):
         return None
     url = f"{RECCO_BASE_URL}/track/{recco_id}/audio-features"
     try:
-        response = requests.get(url, timeout=10)
+        response = robust_get(url, timeout=10)
         if response.status_code != 200:
             if response.status_code == 429:
                 retry_after_header = response.headers.get("Retry-After")
@@ -228,51 +328,87 @@ MAX_WORKERS = (
 SKIP_UNTIL = 0  # can be used to skip a specific number of tracks from a previous run
 
 if SKIP_UNTIL > 0:
-    recco_track_infos = recco_track_infos[SKIP_UNTIL:]
+    tracks_for_features = tracks_for_features[SKIP_UNTIL:]
     start_from_track += SKIP_UNTIL + 1
 
-features = []
+features: List[Dict[str, Any]] = []
 track_idx = 0
-total = len(recco_track_infos)
+total = len(tracks_for_features)
 
-with tqdm(total=total, desc="Fetching audio features") as pbar:
-    while track_idx < total:
-        pbar.set_postfix_str("Fetching...")
-        # Submit up to MAX_WORKERS tasks at a time, starting from track_idx
-        batch = recco_track_infos[track_idx : track_idx + MAX_WORKERS]
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            futures = [executor.submit(fetch_audio_feature, track) for track in batch]
-            got_rate_limit = False
-            for idx, future in enumerate(futures):
-                result = future.result()
-                if isinstance(result, dict) and result.get("status") == 429:
-                    retry_after = result.get("retry_after")
-                    if retry_after is None:
-                        raise ValueError(
-                            f"No retry after info for track at index {track_idx+idx}"
+# checkpoint setup (every 5%)
+checkpoint_stride_features = max(1, math.ceil(total * 0.05)) if total > 0 else 1
+last_checkpoint_at_features = 0
+
+try:
+    with tqdm(total=total, desc="Fetching audio features") as pbar:
+        while track_idx < total:
+            pbar.set_postfix_str("Fetching...")
+            # Submit up to MAX_WORKERS tasks at a time, starting from track_idx
+            batch = tracks_for_features[track_idx : track_idx + MAX_WORKERS]
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                futures = [
+                    executor.submit(fetch_audio_feature, track) for track in batch
+                ]
+                got_rate_limit = False
+                for idx, future in enumerate(futures):
+                    result = future.result()
+                    if isinstance(result, dict) and result.get("status") == 429:
+                        retry_after = result.get("retry_after")
+                        if retry_after is None:
+                            raise ValueError(
+                                f"No retry after info for track at index {track_idx+idx}"
+                            )
+                        pbar.set_postfix_str(
+                            f"Rate limit at {track_idx+idx}th track, waiting {retry_after}s before retrying..."
                         )
-                    pbar.set_postfix_str(
-                        f"Rate limit at {track_idx+idx}th track, waiting {retry_after}s before retrying..."
-                    )
-                    got_rate_limit = True
-                    time.sleep(int(retry_after))
-                    break  # Break the for loop, do not advance track_idx
-                elif isinstance(result, dict) and result.get("status") == 404:
-                    pbar.set_postfix_str(f"{track_idx+idx}th track not found: {result}")
+                        got_rate_limit = True
+                        time.sleep(int(retry_after))
+                        break  # Break the for loop, do not advance track_idx
+                    elif isinstance(result, dict) and result.get("status") == 404:
+                        pbar.set_postfix_str(
+                            f"{track_idx+idx}th track not found: {result}"
+                        )
+                        continue
+                    elif result is not None:
+                        features.append(result)
+                        pbar.update(1)
+                        # periodic checkpoint every 5% of features fetched
+                        if (
+                            len(features) - last_checkpoint_at_features
+                            >= checkpoint_stride_features
+                        ):
+                            checkpoint_path = os.path.join(
+                                TMP_DIR,
+                                f"audio_features_checkpoint_{len(features)}_of_{total}.csv",
+                            )
+                            save_checkpoint_csv(features, checkpoint_path)
+                            last_checkpoint_at_features = len(features)
+                    else:
+                        raise ValueError(
+                            f"Unknown result for track at index {track_idx+idx}: {result}"
+                        )
+                if got_rate_limit:
+                    # Dont advance track_idx, retry this batch / track
                     continue
-                elif result is not None:
-                    features.append(result)
-                    pbar.update(1)
                 else:
-                    raise ValueError(
-                        f"Unknown result for track at index {track_idx+idx}: {result}"
-                    )
-            if got_rate_limit:
-                # Dont advance track_idx, retry this batch / track
-                continue
-            else:
-                # All batch processed, advance track_idx
-                track_idx += len(batch)
+                    # All batch processed, advance track_idx
+                    track_idx += len(batch)
+except NetworkOutageExceededError as e:
+    error_suffix = sanitize_for_filename(type(e).__name__)
+    err_path = (
+        f"./data/audio-features/reccobeats/audio_features.error_{error_suffix}.csv"
+    )
+    save_checkpoint_csv(features, err_path)
+    print(str(e))
+    raise SystemExit(1)
+except Exception as e:
+    error_suffix = sanitize_for_filename(type(e).__name__)
+    err_path = (
+        f"./data/audio-features/reccobeats/audio_features.error_{error_suffix}.csv"
+    )
+    save_checkpoint_csv(features, err_path)
+    print(f"Unhandled error; progress saved to {err_path}")
+    raise SystemExit(1)
 
 # Save to CSV
 if not features:
@@ -281,7 +417,7 @@ if not features:
 
 print(f"Saving {len(features)} audio features to CSV")
 
-file_name = f"./data/audio-features/reccobeats/audio_features_{start_from_track}_to_{start_from_track + len(features) - 1 }.csv"
+file_name = f"./data/audio-features/reccobeats/audio_features_{start_from_track}_{start_from_track + len(features) - 1 }.csv"
 df_features = pd.DataFrame(features)
 df_features.to_csv(file_name, index=False)
 
@@ -294,15 +430,17 @@ audio_features_files = glob.glob(
 )
 audio_features_files.sort()
 
-recco_audio_features = pd.concat([pd.read_csv(file) for file in audio_features_files])
-length_before_drop = len(recco_audio_features)
-recco_audio_features = recco_audio_features.drop_duplicates(subset=["id"])
+df_recco_audio_features = pd.concat(
+    [pd.read_csv(file) for file in audio_features_files]
+)
+length_before_drop = len(df_recco_audio_features)
+df_recco_audio_features = df_recco_audio_features.drop_duplicates(subset=["id"])
 
 print(
-    f"Unique audio features: {len(recco_audio_features)} ({length_before_drop - len(recco_audio_features)} duplicates dropped)"
+    f"Unique audio features: {len(df_recco_audio_features)} ({length_before_drop - len(df_recco_audio_features)} duplicates dropped)"
 )
 
-recco_audio_features.to_csv(
+df_recco_audio_features.to_csv(
     "./data/audio-features/reccobeats/audio_features.csv", index=False
 )
 
@@ -311,34 +449,36 @@ recco_audio_features.to_csv(
 track_infos_files = glob.glob("./data/audio-features/reccobeats/track_infos_*_*.csv")
 track_infos_files.sort()
 
-recco_track_infos = pd.concat([pd.read_csv(file) for file in track_infos_files])
-length_before_drop = len(recco_track_infos)
-recco_track_infos = recco_track_infos.drop_duplicates(subset=["id"])
+df_recco_track_infos = pd.concat([pd.read_csv(file) for file in track_infos_files])
+length_before_drop = len(df_recco_track_infos)
+df_recco_track_infos = df_recco_track_infos.drop_duplicates(subset=["id"])
 print(
-    f"Unique track infos: {len(recco_track_infos)} ({length_before_drop - len(recco_track_infos)} duplicates dropped)"
+    f"Unique track infos: {len(df_recco_track_infos)} ({length_before_drop - len(df_recco_track_infos)} duplicates dropped)"
 )
 
-recco_track_infos.to_csv(
+df_recco_track_infos.to_csv(
     "./data/audio-features/reccobeats/track_infos.csv", index=False
 )
 
 
 # Join dataframes on 'id' using outer join to keep all records
-recco_track_infos = pd.read_csv("./data/audio-features/reccobeats/track_infos.csv")
-recco_audio_features = pd.read_csv(
+df_recco_track_infos_final = pd.read_csv(
+    "./data/audio-features/reccobeats/track_infos.csv"
+)
+df_recco_audio_features_final = pd.read_csv(
     "./data/audio-features/reccobeats/audio_features.csv"
 )
 
 
-recco_tracks_with_audio_features = pd.merge(
-    recco_track_infos, recco_audio_features, on="id", how="outer"
+df_recco_tracks_with_audio_features = pd.merge(
+    df_recco_track_infos_final, df_recco_audio_features_final, on="id", how="outer"
 )
 
 # formatting
-recco_tracks_with_audio_features = recco_tracks_with_audio_features.drop(
+df_recco_tracks_with_audio_features = df_recco_tracks_with_audio_features.drop(
     columns=["trackTitle", "artists", "isrc", "ean", "upc", "availableCountries"]
 )
-recco_tracks_with_audio_features.rename(
+df_recco_tracks_with_audio_features.rename(
     columns={"durationMs": "duration_ms"}, inplace=True
 )
 
@@ -351,15 +491,15 @@ def href_to_spotify_uri(x):
     return pd.NA
 
 
-recco_tracks_with_audio_features["spotify_track_uri"] = (
-    recco_tracks_with_audio_features["href"].apply(href_to_spotify_uri)
+df_recco_tracks_with_audio_features["spotify_track_uri"] = (
+    df_recco_tracks_with_audio_features["href"].apply(href_to_spotify_uri)
 )
-recco_tracks_with_audio_features = recco_tracks_with_audio_features.drop(
+df_recco_tracks_with_audio_features = df_recco_tracks_with_audio_features.drop(
     columns=["href"]
 )
 
 # save to csv
-recco_tracks_with_audio_features.to_csv(
+df_recco_tracks_with_audio_features.to_csv(
     "./data/audio-features/reccobeats/tracks_with_audio_features.csv", index=False
 )
-print(f"Saved {len(recco_tracks_with_audio_features)} tracks with audio features")
+print(f"Saved {len(df_recco_tracks_with_audio_features)} tracks with audio features")
