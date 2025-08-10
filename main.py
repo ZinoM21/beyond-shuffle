@@ -9,7 +9,6 @@ from candidate_selection import select_candidates
 from data_import import load_streaming_data
 from data_modelling import model_data
 from feature_engineering import feature_engineering
-from generate_context_playlists import generate_playlists
 from pattern_finder import find_patterns
 from reporting import display_patterns, display_statistics
 
@@ -48,75 +47,9 @@ def cli():
     """
     Spotify Streaming History Analysis
 
-    This tool can either generate context-based playlists from predefined presets
-    or dynamically find memory-evoking patterns in your listening history.
+    This tool can find memory-evoking patterns in your listening history.
     """
     pass
-
-
-@cli.command("generate")
-@click.option(
-    "-si",
-    "--skip-import",
-    is_flag=True,
-    help="Skip data import and modeling, load modeled data from parquet file.",
-)
-@click.option(
-    "-i",
-    "--input-folder",
-    metavar="FOLDER",
-    help="Name of the folder under ./data containing input JSON files",
-)
-@click.option(
-    "-lo",
-    "--load-only",
-    is_flag=True,
-    help="Only import & model data, then exit (no playlist generation)",
-)
-@click.option(
-    "-p",
-    "--playlists",
-    multiple=True,
-    default=["Commute"],
-    metavar="[PLAYLIST ...]",
-    help="One or more playlist types to generate (e.g., Commute, Workout, Artist_Loyalty, Evening_Chill). Use underscores for spaces in playlist names.",
-)
-@click.option(
-    "-n",
-    "--num-songs",
-    default=20,
-    show_default=True,
-    help="Number of songs per playlist",
-)
-@click.option(
-    "--max-per-artist",
-    default=None,
-    type=int,
-    help="Maximum number of songs per artist in a playlist (default: auto, ~15% of playlist size)",
-)
-def generate(
-    skip_import, input_folder, load_only, playlists, num_songs, max_per_artist
-):
-    """Generate playlists from predefined presets."""
-    data = load_and_model_data(skip_import, input_folder)
-
-    if load_only:
-        click.echo("Data loaded. Exiting.")
-        return
-
-    playlists_to_generate = [p.replace("_", " ") for p in playlists]
-    generated_playlists = generate_playlists(
-        data, playlists_to_generate, num_songs, max_per_artist
-    )
-
-    click.echo("\n--- Generated Playlists ---")
-    for name, tracks in generated_playlists.items():
-        click.echo(f"\n🎵 {name} Playlist ({len(tracks)} songs):")
-        for i, (track, artist) in enumerate(tracks, 1):
-            click.echo(f"  {i}. {track} — {artist}")
-    click.echo("\n---------------------------\n")
-
-    click.echo("Done! 🎉 Check the ./data/out/ directory for the results.")
 
 
 @cli.command("find-patterns")

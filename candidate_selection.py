@@ -2,7 +2,7 @@ from typing import Dict, List
 
 import pandas as pd
 
-from constants import WEIGHTS
+from constants import CANDIDATE_SELECTION_WEIGHTS
 from pattern_finder import DetectedPattern, Habit
 
 
@@ -66,9 +66,9 @@ def _calculate_popularity(pattern_tracks: pd.DataFrame) -> pd.DataFrame:
 
     # 3. Calculate final weighted score
     track_stats["contextual_popularity_score"] = (
-        WEIGHTS["count"] * normalized_plays
-        + WEIGHTS["skip_rate"] * non_skip_rate
-        + WEIGHTS["attention_span"] * attention_score
+        CANDIDATE_SELECTION_WEIGHTS["count"] * normalized_plays
+        + CANDIDATE_SELECTION_WEIGHTS["skip_rate"] * non_skip_rate
+        + CANDIDATE_SELECTION_WEIGHTS["attention_span"] * attention_score
     )
 
     return pattern_tracks.merge(

@@ -3,17 +3,6 @@ import pandas as pd
 from pandas import DataFrame
 
 
-def get_time_of_day(hour: int) -> str:
-    if 5 <= hour < 12:
-        return "Morning"
-    elif 12 <= hour < 17:
-        return "Afternoon"
-    elif 17 <= hour < 21:
-        return "Evening"
-    else:
-        return "Night"
-
-
 def get_season(month: int) -> str:
     if 3 <= month <= 5:
         return "Spring"
@@ -87,69 +76,6 @@ def add_skipping_behavior(input_df: pd.DataFrame) -> pd.DataFrame:
     return output_df
 
 
-def compute_personal_popularity(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compute the personal popularity of each track.
-    """
-    df = df.copy()
-    df["personal_popularity"] = df.groupby("track")["track"].transform("count")
-    return df
-
-
-def compute_artist_popularity(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compute the popularity of each artist.
-    """
-    df = df.copy()
-    df["artist_popularity"] = df.groupby("artist")["artist"].transform("count")
-    return df
-
-
-def compute_artist_loyalty(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compute the max number of consecutive plays of the same artist.
-    """
-    df = df.copy()
-    if "artist" in df.columns:
-        artist_change = (df["artist"] != df["artist"].shift()).cumsum()
-        df["artist_loyalty"] = df.groupby(artist_change).cumcount() + 1
-    else:
-        df["artist_loyalty"] = 0
-    return df
-
-
-# def compute_vacation_status(df: pd.DataFrame) -> pd.DataFrame:
-#     """
-#     Compute the vacation status of the user.
-#     """
-#     df = df.copy()
-#     if "country" in df.columns:
-#         home_country = df["country"].mode().iloc[0]
-#         df["is_vacation"] = df["country"] != home_country
-#     else:
-#         df["is_vacation"] = False
-#     return df
-
-
-def compute_first_played_months_ago(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    For each row, compute how many months ago the track was first played (relative to the row's timestamp).
-    Adds 'first_played_months_ago' column.
-    """
-    df = df.copy()
-    if "track" in df.columns:
-        # Find the first play timestamp for each track
-        first_play = df.groupby("track").apply(lambda x: x.index.min())
-        # Map to each row
-        df["first_played_timestamp"] = df["track"].map(first_play)
-        # Compute months difference
-        months_ago = (df.index.to_series() - df["first_played_timestamp"]).dt.days // 30
-        df["first_played_months_ago"] = months_ago
-    else:
-        df["first_played_months_ago"] = 99
-    return df
-
-
 def feature_engineering(df: DataFrame) -> DataFrame:
     """
     Engineers features needed for context-based playlists.
@@ -162,9 +88,6 @@ def feature_engineering(df: DataFrame) -> DataFrame:
         df.index = pd.to_datetime(df.index)
 
     # Time-based features
-    df.loc[:, "time_of_day"] = pd.Series(df.index.hour, index=df.index).map(
-        get_time_of_day
-    )
     df.loc[:, "day_of_week_nr"] = pd.Series(df.index.dayofweek, index=df.index)
     df.loc[:, "day_of_week"] = pd.Series(df.index.day_name(), index=df.index)
     df.loc[:, "is_weekday"] = df["day_of_week_nr"] < 5
@@ -174,18 +97,20 @@ def feature_engineering(df: DataFrame) -> DataFrame:
     df.loc[:, "session_gap_s"] = (
         df.index.to_series().diff().dt.total_seconds().fillna(0)
     )
+    gap_threshold_s = 45 * 60
+    session_break = df["session_gap_s"] > gap_threshold_s
+    df.loc[:, "_session_id"] = session_break.cumsum()
+    # Session length (number of tracks) and duration (min)
+    df.loc[:, "session_length"] = df.groupby("_session_id")["_session_id"].transform(
+        "count"
+    )
+    df.loc[:, "session_duration_min"] = (
+        df.groupby("_session_id")["session_gap_s"].transform("sum") / 60.0
+    )
 
     df = compute_attention_span(df)
 
     df = add_skipping_behavior(df)
-
-    df = compute_personal_popularity(df)
-
-    df = compute_artist_popularity(df)
-
-    df = compute_artist_loyalty(df)
-
-    df = compute_first_played_months_ago(df)
 
     print("Feature engineering complete.")
 

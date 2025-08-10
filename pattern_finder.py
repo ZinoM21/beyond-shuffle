@@ -1,192 +1,33 @@
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 import pandas as pd
 
+from constants import MIN_TRACKS_FOR_PLAYLIST, PERIOD_MIN_DAYS
 from constants import (
-    ANOMALY_THRESHOLD,
-    MIN_DURATION_DAYS,
-    MIN_TRACKS_FOR_PLAYLIST,
-    MIN_TRACKS_PER_SLOT,
+    CATEGORICAL_FEATURES_TO_CHECK,
     NUMERICAL_FEATURES_TO_CHECK,
-    STEP_SIZE_DAYS,
-    WINDOW_SIZE_DAYS,
+    HABIT_MIN_CLUSTER_SHARE,
+    HABIT_MIN_CLUSTER_WEEKS,
+    HABIT_FEATURE_ZSCORE_THRESHOLD,
+    HABIT_BEHAVIORAL_FEATURES,
+    HABIT_BEHAVIORAL_ZSCORE_THRESHOLD,
+    HABIT_MIN_NUM_FEATURES,
+    HABIT_MIN_STREAMS_PER_SLOT,
 )
-
-
-@dataclass
-class DetectedPattern:
-    """A base class for a detected pattern in listening history."""
-
-    name: str
-    description: str
-    score: float
-    tracks: pd.DataFrame
-    contributing_features: Dict[str, Any] = field(default_factory=dict)
-    pattern_type: str = "Generic"
-
-
-@dataclass
-class Period(DetectedPattern):
-    """Represents a significant, anomalous listening period of 2 days or more."""
-
-    pattern_type: str = "Period"
-    start_date: Any = None
-    end_date: Any = None
-
-
-@dataclass
-class Habit(DetectedPattern):
-    """Represents a recurring, cyclical listening habit."""
-
-    pattern_type: str = "Habit"
-    time_slot: Tuple = ()  # e.g., ('Wednesday', 'Afternoon')
-
-
-def _create_habit(
-    name: str,
-    description: str,
-    score: float,
-    tracks: pd.DataFrame,
-    feature: str,
-    direction: str,
-    time_slot: Tuple,
-) -> Habit:
-    """Helper function to create a Habit object."""
-    day, time_of_day = time_slot
-    name = f"{direction} {feature.capitalize()} on {day} {time_of_day}"
-
-    return Habit(
-        name=name,
-        description=description,
-        score=score,
-        tracks=tracks,
-        contributing_features={feature: direction},
-        time_slot=time_slot,
-    )
-
-
-def _detect_categorical_anomalies(
-    df: pd.DataFrame, baseline_country: str
-) -> List[Dict]:
-    """
-    Scans through listening data to find anomalous windows based on categorical features.
-    It uses a sliding window approach and returns windows where listening habits
-    deviate from the baseline.
-    """
-    detected_windows = []
-    df_sorted = df.sort_index()
-    start_date, end_date = df_sorted.index.min(), df_sorted.index.max()
-    current_date = start_date
-
-    while current_date + pd.Timedelta(days=WINDOW_SIZE_DAYS - 1) <= end_date:
-        window_end_date = current_date + pd.Timedelta(days=WINDOW_SIZE_DAYS - 1)
-        window = df_sorted.loc[current_date:window_end_date]
-
-        if window.empty:
-            current_date += pd.Timedelta(days=STEP_SIZE_DAYS)
-            continue
-
-        anomalies = {}
-        # Country anomaly
-        if "country" in window.columns:
-            country_counts = window["country"].value_counts(normalize=True)
-            for country, percentage in country_counts.items():
-                if (
-                    country != "ZZ"
-                    and country != baseline_country
-                    and percentage >= ANOMALY_THRESHOLD
-                ):
-                    anomalies["country"] = country
-
-        if anomalies:
-            detected_windows.append(
-                {
-                    "start_date": window.index.min(),
-                    "end_date": window.index.max(),
-                    "anomalies": anomalies,
-                }
-            )
-        current_date += pd.Timedelta(days=STEP_SIZE_DAYS)
-
-    return detected_windows
-
-
-def _merge_consecutive_windows(detected_windows: List[Dict]) -> List[Dict]:
-    """Merges consecutive or overlapping windows with the same anomaly."""
-    if not detected_windows:
-        return []
-
-    # Sort by start date to ensure correct merging order
-    detected_windows.sort(key=lambda x: x["start_date"])
-
-    merged_periods = []
-    current_period = detected_windows[0]
-
-    for next_window in detected_windows[1:]:
-        # Check for same anomaly and overlapping/consecutive windows
-        time_gap = next_window["start_date"] - current_period["end_date"]
-        if frozenset(next_window["anomalies"].items()) == frozenset(
-            current_period["anomalies"].items()
-        ) and time_gap <= pd.Timedelta(days=STEP_SIZE_DAYS):
-            # Merge by extending the end date
-            current_period["end_date"] = max(
-                current_period["end_date"], next_window["end_date"]
-            )
-        else:
-            # Found a new, separate period
-            merged_periods.append(current_period)
-            current_period = next_window
-
-    merged_periods.append(current_period)
-    return merged_periods
-
-
-def _create_period_from_data(
-    period_data: Dict, df: pd.DataFrame, baseline: Dict[str, Any]
-) -> Period:
-    """Creates a Period object from raw period data."""
-    start_date = period_data["start_date"]
-    end_date = period_data["end_date"]
-    period_df = df.loc[start_date:end_date].copy()
-
-    # Determine the main anomaly. For now, we just take the first one.
-    # This could be expanded to handle multiple anomalies more gracefully.
-    main_anomaly = next(iter(period_data["anomalies"].items()), (None, None))
-    anomaly_type, anomaly_value = main_anomaly
-
-    # Filter for only the tracks that contributed to the anomaly
-    contributing_tracks = period_df[period_df[anomaly_type] == anomaly_value]
-
-    unique_contributing_tracks = contributing_tracks.drop_duplicates(
-        subset=["track", "artist"], keep="first"
-    )
-
-    duration_days = (end_date - start_date).days + 1
-
-    # Scoring
-    num_features = len(period_data["anomalies"])
-    score = len(unique_contributing_tracks) * duration_days * (num_features**2)
-    if "country" in period_data["anomalies"]:
-        score *= 5
-
-    # Naming and Description
-    name = f"Travel to {anomaly_value} ({start_date.date()} - {end_date.date()})"
-    desc = f"A {duration_days}-day period defined by {name}."
-
-    print(
-        f"Found period with {len(contributing_tracks)} streams, i.e. {len(unique_contributing_tracks)} unique tracks"
-    )
-
-    return Period(
-        name=name,
-        description=desc,
-        score=score,
-        tracks=contributing_tracks,
-        contributing_features=period_data["anomalies"],
-        start_date=start_date,
-        end_date=end_date,
-    )
+from pf_periods import (
+    create_period_from_data,
+    detect_categorical_anomalies,
+    merge_consecutive_windows,
+)
+from pf_habits import (
+    cluster_audio_profiles,
+    compute_slot_feature_stats,
+    format_slot_name,
+    refine_slot_name_with_device,
+    select_habit_slots,
+    slot_key_builders,
+)
+from pf_types import DetectedPattern, Habit, Period
 
 
 def calculate_baseline(df: pd.DataFrame) -> Dict[str, Any]:
@@ -202,14 +43,7 @@ def calculate_baseline(df: pd.DataFrame) -> Dict[str, Any]:
     baseline = {}
     df = df.sort_values("datetime").reset_index(drop=True)
 
-    categorical_features = [
-        "country",
-        "day_of_week",
-        "season",
-        "platform",
-        "time_of_day",
-    ]
-    for col in categorical_features:
+    for col in CATEGORICAL_FEATURES_TO_CHECK:
         if col in df.columns and not df[col].empty:
             baseline[col] = df[col].mode()[0]
 
@@ -260,81 +94,154 @@ def find_periods(df: pd.DataFrame, baseline: Dict[str, Any]) -> List[Period]:
     baseline_country = baseline.get("country")
     if not isinstance(baseline_country, str):
         baseline_country = ""
-    detected_windows = _detect_categorical_anomalies(df_local, baseline_country)
+    detected_windows = detect_categorical_anomalies(df_local, baseline_country)
 
     if not detected_windows:
         return []
 
-    merged_periods = _merge_consecutive_windows(detected_windows)
+    merged_periods = merge_consecutive_windows(detected_windows)
 
     final_periods = []
     for period in merged_periods:
-        period = _create_period_from_data(period, df_local, baseline)
+        period = create_period_from_data(period, df_local, baseline)
 
         if (
             len(period.tracks) >= MIN_TRACKS_FOR_PLAYLIST
-            and (period.end_date - period.start_date).days + 1 >= MIN_DURATION_DAYS
+            and (period.end_date - period.start_date).days + 1 >= PERIOD_MIN_DAYS
         ):
             final_periods.append(period)
 
     return final_periods
 
 
+def _slot_key_builders(_: pd.DataFrame):
+    # Backwards compatibility shim for external calls; delegate to pf_habits
+    return slot_key_builders()
+
+
+def _compute_slot_feature_stats(df: pd.DataFrame, slot_col: str) -> pd.DataFrame:
+    return compute_slot_feature_stats(df, slot_col)
+
+
+def _select_habit_slots(stats: pd.DataFrame):
+    return select_habit_slots(stats)
+
+
+def _extract_slot_group(df_with_slot: pd.DataFrame, slot_key):
+    return df_with_slot[df_with_slot["_slot"] == slot_key]
+
+
+def _format_slot_name(schema: str, slot_key):
+    return format_slot_name(schema, slot_key)
+
+
+def _refine_slot_name_with_device(df_slot: pd.DataFrame, schema: str, base_name: str):
+    return refine_slot_name_with_device(df_slot, base_name)
+
+
 def find_habits(df: pd.DataFrame, baseline: Dict[str, Any]) -> List[Habit]:
     """
-    Finds recurring, cyclical listening habits, including combined feature habits.
+    Multi-feature recurring-slot habit detection.
 
-    A habit is detected by grouping tracks by time slots (e.g., weekday afternoons)
-    and checking if the audio features in that slot consistently deviate from the baseline.
-
-    Args:
-        df: The user's listening history.
-        baseline: The pre-calculated baseline profile.
-
-    Returns:
-        A list of detected Habit objects.
+    Strategy:
+    - Build several slot schemas (without using time_of_day) like day_of_week+hour, +platform, and season+hour.
+    - For each schema, compute per-slot means for audio features and compare to global means via z-scores.
+    - Select slots with sufficient streams, recurrence across weeks, and multiple deviating features.
+    - Emit habits for those slots with contributing feature directions.
     """
-    habits = []
-    grouped = df.groupby(["day_of_week", "time_of_day"])
+    df_local = df.copy()
+    # Ensure datetime index for resampling/feature extraction
+    if not isinstance(df_local.index, pd.DatetimeIndex):
+        if "datetime" in df_local.columns:
+            df_local["datetime"] = pd.to_datetime(df_local["datetime"])
+            df_local = df_local.set_index("datetime")
+        else:
+            df_local = df_local.sort_index()
 
-    for feature in NUMERICAL_FEATURES_TO_CHECK:
-        slot_means = grouped[feature].mean().dropna()
-        if slot_means.empty:
+    habits: List[Habit] = []
+    builders = _slot_key_builders(df_local)
+
+    for schema, build in builders.items():
+        df_schema = build(df_local)
+        if "_slot" not in df_schema.columns:
             continue
+        # Cluster audio profiles globally to use discrete style buckets in addition to z-scores
+        df_schema = df_schema.copy()
+        df_schema["_audio_cluster"] = cluster_audio_profiles(df_schema)
 
-        highest_slot_name = slot_means.idxmax()
-        lowest_slot_name = slot_means.idxmin()
+        stats = _compute_slot_feature_stats(df_schema, "_slot")
+        selected_slots = _select_habit_slots(stats)
 
-        assert isinstance(highest_slot_name, tuple)
-        assert isinstance(lowest_slot_name, tuple)
+        for slot_key in selected_slots:
+            slot_group = _extract_slot_group(df_schema, slot_key)
+            # Require that a single audio cluster dominates within the slot and recurs across weeks
+            cluster_counts = slot_group["_audio_cluster"].value_counts(normalize=True)
+            dominant_cluster = None
+            dominant_share = 0.0
+            if not cluster_counts.empty:
+                dominant_cluster = cluster_counts.index[0]
+                dominant_share = float(cluster_counts.iloc[0])
+            if (
+                dominant_cluster is None
+                or dominant_cluster == -1
+                or dominant_share < HABIT_MIN_CLUSTER_SHARE
+                or slot_group.index.to_series().dt.isocalendar().week.nunique()
+                < HABIT_MIN_CLUSTER_WEEKS
+            ):
+                continue
 
-        high_group = grouped.get_group(highest_slot_name)
-        if len(high_group) >= MIN_TRACKS_PER_SLOT:
-            day, time_of_day = highest_slot_name
+            # Determine contributing features and directions
+            contributing: Dict[str, str] = {}
+            for feat in NUMERICAL_FEATURES_TO_CHECK:
+                if feat not in slot_group.columns:
+                    continue
+                mu = df_local[feat].mean()
+                sigma = df_local[feat].std() or 0.0
+                if sigma == 0 or pd.isna(sigma):
+                    continue
+                slot_mu = slot_group[feat].mean()
+                z = (slot_mu - mu) / sigma
+                if abs(z) >= HABIT_FEATURE_ZSCORE_THRESHOLD:
+                    contributing[feat] = "High" if z > 0 else "Low"
+
+            # Add behavioral feature directions
+            for feat in HABIT_BEHAVIORAL_FEATURES:
+                if feat not in slot_group.columns:
+                    continue
+                mu = df_local[feat].mean()
+                sigma = df_local[feat].std() or 0.0
+                if sigma == 0 or pd.isna(sigma):
+                    continue
+                slot_mu = slot_group[feat].mean()
+                z = (slot_mu - mu) / sigma
+                if abs(z) >= HABIT_BEHAVIORAL_ZSCORE_THRESHOLD:
+                    direction = "High" if z > 0 else "Low"
+                    contributing[feat] = direction
+
+            if len(contributing) < HABIT_MIN_NUM_FEATURES:
+                continue
+
+            if len(slot_group) < HABIT_MIN_STREAMS_PER_SLOT:
+                continue
+
+            slot_name = _format_slot_name(schema, slot_key)
+            slot_name = _refine_slot_name_with_device(slot_group, schema, slot_name)
+            # Enrich name with strong recurring anchors beyond day: add "at HH:MM" if not already present
+            if ":" not in slot_name:
+                # If hour exists in the slot group, infer a stable hour
+                if "hour" in slot_group.columns:
+                    hour_mode = int(slot_group["hour"].mode().iloc[0])
+                    slot_name = f"{slot_name} at {hour_mode:02d}:00"
+            description = f"Recurring listening pattern."
+
             habits.append(
-                _create_habit(
-                    name=f"Highest {feature.capitalize()} Habit",
-                    description=f"Your most consistently high-{feature} music is listened to on {day} {time_of_day}s.",
-                    score=len(high_group) * slot_means.max(),
-                    tracks=high_group,
-                    feature=feature,
-                    direction="High",
-                    time_slot=highest_slot_name,
-                )
-            )
-
-        low_group = grouped.get_group(lowest_slot_name)
-        if len(low_group) >= MIN_TRACKS_PER_SLOT:
-            day, time_of_day = lowest_slot_name
-            habits.append(
-                _create_habit(
-                    name=f"Lowest {feature.capitalize()} Habit",
-                    description=f"Your most consistently low-{feature} music is listened to on {day} {time_of_day}s.",
-                    score=len(low_group) * slot_means.min(),
-                    tracks=low_group,
-                    feature=feature,
-                    direction="Low",
-                    time_slot=lowest_slot_name,
+                Habit(
+                    name=slot_name,
+                    description=description,
+                    tracks=slot_group,
+                    contributing_features=contributing,
+                    time_slot=slot_key,
+                    slot_schema=schema,
                 )
             )
 
@@ -360,7 +267,5 @@ def find_patterns(df: pd.DataFrame) -> List[DetectedPattern]:
     all_patterns.extend(find_periods(df, baseline))
     print("Finding recurring habits...")
     all_patterns.extend(find_habits(df, baseline))
-
-    print(f"Baseline profile calculated: {baseline}")
 
     return all_patterns

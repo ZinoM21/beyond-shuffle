@@ -14,11 +14,10 @@ def display_patterns(patterns: List[DetectedPattern], top_tracks_map: dict):
         click.echo("No significant patterns found.")
         return
 
-    for p in sorted(patterns, key=lambda x: x.score, reverse=True):
+    for p in sorted(patterns, key=lambda x: x.name, reverse=True):
         pattern_type = p.__class__.__name__
-        click.echo(f"🎵 Pattern: {p.name} ({pattern_type})")
+        click.echo(f"🎵 {pattern_type}: {p.name}")
         click.echo(f"   Description: {p.description}")
-        click.echo(f"   Score: {p.score:.2f}")
         click.echo(f"   Contributing Features: {p.contributing_features}")
 
         top_tracks = top_tracks_map.get(p.name, pd.DataFrame())
@@ -62,9 +61,10 @@ def display_statistics(patterns: List[DetectedPattern]):
             click.echo(f"  - {type}: {count}")
 
     if habits:
-        click.echo("\nHabit Breakdown by Time Slot:")
-        habit_slots = Counter(f"{p.time_slot[0]} {p.time_slot[1]}s" for p in habits)
-        for slot, count in habit_slots.most_common(5):
-            click.echo(f"  - {slot}: {count} habits")
+        click.echo("\nHabit Breakdown:")
+        # Include contributing features in the breakdown for clarity
+        habit_keys = Counter(f"{p.name} — {get_pattern_description(p)}" for p in habits)
+        for key, count in habit_keys.most_common():
+            click.echo(f"  - {key}: {count}")
 
     click.echo("\n--------------------------\n")

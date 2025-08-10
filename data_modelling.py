@@ -288,6 +288,46 @@ def rename_devices(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def add_platform_group(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add a coarse-grained platform group to reduce sparsity and avoid 'Other' dominance.
+    Groups: 'Mobile', 'Tablet', 'Computer', 'Smart Speaker', 'TV', 'Console', 'Car', 'Other'
+    """
+    df = df.copy()
+
+    platform = df["platform"].astype(str).str.lower().fillna("")
+
+    def classify(p: str) -> str:
+        if any(k in p for k in ["iphone", "android", "galaxy", "pixel"]):
+            return "Mobile"
+        if "ipad" in p or "tablet" in p:
+            return "Tablet"
+        if any(k in p for k in ["macbook", "windows", "intel", "arm", "mac "]):
+            return "Computer"
+        if any(
+            k in p
+            for k in [
+                "sonos",
+                "echo",
+                "soundtouch",
+                "yamaha",
+                "chromecast audio",
+                "amp",
+            ]
+        ):
+            return "Smart Speaker"
+        if any(k in p for k in ["chromecast", "fire tv", "smart tv", "tv", "receiver"]):
+            return "TV"
+        if any(k in p for k in ["playstation", "xbox"]):
+            return "Console"
+        if any(k in p for k in ["car", "bmw", "audi", "mercedes"]):
+            return "Car"
+        return "Other"
+
+    df["platform_group"] = platform.map(classify)
+    return df
+
+
 def drop_devices(df: pd.DataFrame, exclude_devices: list[str]) -> pd.DataFrame:
     """
     Drop devices from the DataFrame.
@@ -375,6 +415,7 @@ def model_data(
     df = drop_empty_tracks(df)
 
     df = rename_devices(df)
+    df = add_platform_group(df)
 
     if len(EXCLUDE_DEVICES) > 0:
         df = drop_devices(df, EXCLUDE_DEVICES)
